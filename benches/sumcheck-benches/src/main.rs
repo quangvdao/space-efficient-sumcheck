@@ -76,9 +76,9 @@ fn run_on_field<F: Field>(bench_args: BenchArgs) {
                 };
             let transcript = ProductSumcheck::<F>::prove::<
                 BenchStream<F>,
-                TimeProductProver<F, BenchStream<F>>,
+                TimeProductProver<F, BenchStream<F>, 2>,
             >(
-                &mut TimeProductProver::<F, BenchStream<F>>::new(config),
+                &mut TimeProductProver::<F, BenchStream<F>, 2>::new(config),
                 &mut rng,
             );
             assert!(transcript.is_accepted);

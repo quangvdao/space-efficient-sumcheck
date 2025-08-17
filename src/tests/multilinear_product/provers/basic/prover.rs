@@ -8,7 +8,7 @@ use crate::{
 
 impl<F: Field> Prover<F> for BasicProductProver<F> {
     type ProverConfig = BasicProductProverConfig<F>;
-    type ProverMessage = Option<(F, F, F)>;
+    type ProverMessage = Option<Vec<F>>;
     type VerifierMessage = Option<F>;
 
     fn claim(&self) -> F {
@@ -43,8 +43,8 @@ impl<F: Field> Prover<F> for BasicProductProver<F> {
         // Increment the round counter
         self.current_round += 1;
 
-        // Return the computed polynomial sums
-        Some(sums)
+        // Return the computed polynomial sums in node order [0, 1, 1/2]
+        Some(ark_std::vec![sums.0, sums.1, sums.2])
     }
 }
 

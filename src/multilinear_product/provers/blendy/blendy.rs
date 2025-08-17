@@ -29,7 +29,7 @@ pub struct BlendyProductProver<F: Field, S: Stream<F>> {
     pub prev_table_size: usize,
     pub state_comp_set: BTreeSet<usize>,
     pub switched_to_vsbw: bool,
-    pub vsbw_prover: TimeProductProver<F, S>,
+    pub vsbw_prover: TimeProductProver<F, S, 2>,
 }
 
 impl<F: Field, S: Stream<F>> BlendyProductProver<F, S> {
@@ -58,14 +58,17 @@ impl<F: Field, S: Stream<F>> BlendyProductProver<F, S> {
         }
     }
 
-    pub fn compute_round(&mut self) -> (F, F, F) {
+    pub fn compute_round(&mut self) -> Vec<F> {
         let mut sum_0 = F::ZERO;
         let mut sum_1 = F::ZERO;
         let mut sum_half = F::ZERO;
 
         // in the last rounds, we switch to the memory intensive prover
         if self.switched_to_vsbw {
-            (sum_0, sum_1, sum_half) = self.vsbw_prover.vsbw_evaluate();
+            let (s0, s1, sh) = self.vsbw_prover.vsbw_evaluate();
+            sum_0 = s0;
+            sum_1 = s1;
+            sum_half = sh;
         }
         // if first few rounds, then no table is computed, need to compute sums from the streams
         else if self.current_round + 1 <= self.last_round_phase1 {
@@ -172,7 +175,7 @@ impl<F: Field, S: Stream<F>> BlendyProductProver<F, S> {
             }
             sum_half = sum_half * self.inverse_four;
         }
-        (sum_0, sum_1, sum_half)
+        ark_std::vec![sum_0, sum_1, sum_half]
     }
 
     pub fn compute_state(&mut self) {

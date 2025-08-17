@@ -3,16 +3,16 @@ use ark_std::vec::Vec;
 
 use crate::streams::Stream;
 
-pub struct TimeProductProver<F: Field, S: Stream<F>> {
+pub struct TimeProductProver<F: Field, S: Stream<F>, const D: usize> {
     pub claim: F,
     pub current_round: usize,
-    pub evaluations: Vec<Option<Vec<F>>>,
-    pub streams: Option<Vec<S>>,
+    pub evaluations: [Option<Vec<F>>; D],
+    pub streams: Option<[S; D]>,
     pub num_variables: usize,
-    pub inverse_four: F,
+    pub inverse_two_pow_d: F,
 }
 
-impl<'a, F: Field, S: Stream<F>> TimeProductProver<F, S> {
+impl<'a, F: Field, S: Stream<F>, const D: usize> TimeProductProver<F, S, D> {
     pub fn total_rounds(&self) -> usize {
         self.num_variables
     }
@@ -25,8 +25,9 @@ impl<'a, F: Field, S: Stream<F>> TimeProductProver<F, S> {
      */
     pub fn vsbw_evaluate(&self) -> (F, F, F) {
         // Initialize accumulators
+        let mut sum_0 = F::ZERO;
+        let mut sum_1 = F::ZERO;
         let mut sum_half = F::ZERO;
-        let mut j_prime_table: ((F, F), (F, F)) = ((F::ZERO, F::ZERO), (F::ZERO, F::ZERO));
 
         // Calculate the bitmask for the number of free variables
         let bitmask: usize = 1 << (self.num_free_variables() - 1);
@@ -42,64 +43,41 @@ impl<'a, F: Field, S: Stream<F>> TimeProductProver<F, S> {
 
         // Iterate through evaluations
         for i in 0..(evaluations_len / 2) {
-            // these must be zeroed out
-            let mut x_table: (F, F) = (F::ZERO, F::ZERO);
-            let mut y_table: (F, F) = (F::ZERO, F::ZERO);
+            let mut prod0 = F::ONE;
+            let mut prod1 = F::ONE;
+            let mut prod_half = F::ONE;
 
-            // get all the values
-            let p_zero = match &self.evaluations[0] {
-                None => match &self.streams {
-                    Some(streams) => streams[0].evaluation(i),
-                    None => panic!("Both streams and evaluations cannot be None"),
-                },
-                Some(evaluations_p) => evaluations_p[i],
-            };
-            let q_zero = match &self.evaluations[1] {
-                None => match &self.streams {
-                    Some(streams) => streams[1].evaluation(i),
-                    None => panic!("Both streams and evaluations cannot be None"),
-                },
-                Some(evaluations_q) => evaluations_q[i],
-            };
-            let p_one = match &self.evaluations[0] {
-                None => match &self.streams {
-                    Some(streams) => streams[0].evaluation(i | bitmask),
-                    None => panic!("Both streams and evaluations cannot be None"),
-                },
-                Some(evaluations_p) => evaluations_p[i | bitmask],
-            };
-            let q_one = match &self.evaluations[1] {
-                None => match &self.streams {
-                    Some(streams) => streams[1].evaluation(i | bitmask),
-                    None => panic!("Both streams and evaluations cannot be None"),
-                },
-                Some(evaluations_q) => evaluations_q[i | bitmask],
-            };
+            for j in 0..D {
+                let v0 = match &self.evaluations[j] {
+                    None => match &self.streams {
+                        Some(streams) => streams[j].evaluation(i),
+                        None => panic!("Both streams and evaluations cannot be None"),
+                    },
+                    Some(evals) => evals[i],
+                };
+                let v1 = match &self.evaluations[j] {
+                    None => match &self.streams {
+                        Some(streams) => streams[j].evaluation(i | bitmask),
+                        None => panic!("Both streams and evaluations cannot be None"),
+                    },
+                    Some(evals) => evals[i | bitmask],
+                };
+                prod0 *= v0;
+                prod1 *= v1;
+                prod_half *= v0 + v1;
+            }
 
-            // update tables
-            x_table.0 += p_zero;
-            y_table.0 += q_zero;
-            y_table.1 += q_one;
-            x_table.1 += p_one;
-
-            // update j_prime
-            j_prime_table.0 .0 = j_prime_table.0 .0 + x_table.0 * y_table.0;
-            j_prime_table.1 .1 = j_prime_table.1 .1 + x_table.1 * y_table.1;
-            j_prime_table.0 .1 = j_prime_table.0 .1 + x_table.0 * y_table.1;
-            j_prime_table.1 .0 = j_prime_table.1 .0 + x_table.1 * y_table.0;
+            sum_0 += prod0;
+            sum_1 += prod1;
+            sum_half += prod_half;
         }
 
-        // update
-        let sum_0 = j_prime_table.0 .0;
-        let sum_1 = j_prime_table.1 .1;
-        sum_half +=
-            j_prime_table.0 .0 + j_prime_table.1 .1 + j_prime_table.0 .1 + j_prime_table.1 .0;
-        sum_half = sum_half * self.inverse_four;
+        sum_half = sum_half * self.inverse_two_pow_d;
 
         (sum_0, sum_1, sum_half)
     }
     pub fn vsbw_reduce_evaluations(&mut self, verifier_message: F, verifier_message_hat: F) {
-        for i in 0..self.evaluations.len() {
+        for i in 0..D {
             // Clone or initialize the evaluations vector
             let mut evaluations = match &self.evaluations[i] {
                 Some(evaluations) => evaluations.clone(),

@@ -62,6 +62,39 @@ impl<'a, F: Field, O: OrderStrategy> LagrangePolynomial<'a, F, O> {
         // Return the evaluation of the unique quadratic polynomial
         prover_message.0 * basis_p_0 + prover_message.1 * basis_p_1 + prover_message.2 * basis_p_2
     }
+
+    pub fn evaluate_from_points(verifier_message: F, prover_values: &[F]) -> F {
+        // Nodes strategy: [0, 1, 1/2, 2, 3, 4, ...] to match legacy for k=3 and extend for k>3
+        let k = prover_values.len();
+        assert!(k >= 2, "Need at least 2 points to interpolate");
+
+        // Build x-nodes on the fly
+        let mut x_nodes: Vec<F> = Vec::with_capacity(k);
+        for i in 0..k {
+            let xi = match i {
+                0 => F::zero(),
+                1 => F::one(),
+                2 => F::from(2_u32).inverse().unwrap(),
+                _ => F::from((i as u32) - 1_u32),
+            };
+            x_nodes.push(xi);
+        }
+
+        // Standard Lagrange interpolation at verifier_message
+        let mut acc = F::zero();
+        for i in 0..k {
+            let xi = x_nodes[i];
+            let mut li = F::one();
+            for j in 0..k {
+                if i == j { continue; }
+                let xj = x_nodes[j];
+                let denom = (xi - xj).inverse().expect("distinct nodes required");
+                li *= (verifier_message - xj) * denom;
+            }
+            acc += prover_values[i] * li;
+        }
+        acc
+    }
 }
 
 impl<'a, F: Field> Iterator for LagrangePolynomial<'a, F, GraycodeOrder> {

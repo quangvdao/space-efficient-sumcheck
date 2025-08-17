@@ -18,7 +18,7 @@ pub struct SpaceProductProver<F: Field, S: Stream<F>> {
 }
 
 impl<F: Field, S: Stream<F>> SpaceProductProver<F, S> {
-    pub fn cty_evaluate(&mut self) -> (F, F, F) {
+    pub fn cty_evaluate(&mut self) -> Vec<F> {
         let mut sum_0: F = F::ZERO;
         let mut sum_1: F = F::ZERO;
         let mut sum_half: F = F::ZERO;
@@ -69,6 +69,6 @@ impl<F: Field, S: Stream<F>> SpaceProductProver<F, S> {
             }
         }
         sum_half = sum_half * self.inverse_four;
-        (sum_0, sum_1, sum_half)
+        vec![sum_0, sum_1, sum_half]
     }
 }

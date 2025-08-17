@@ -14,16 +14,16 @@ fn multilinear_product_round_sanity<F, P>(
     eval_1: F,
 ) where
     F: Field,
-    P: Prover<F, VerifierMessage = Option<F>, ProverMessage = Option<(F, F, F)>>,
+    P: Prover<F, VerifierMessage = Option<F>, ProverMessage = Option<Vec<F>>>,
 {
     let round = p.next_message(message).unwrap();
     assert_eq!(
-        round.0, eval_0,
+        round[0], eval_0,
         "g0 should evaluate correctly round {}",
         round_num
     );
     assert_eq!(
-        round.1, eval_1,
+        round[1], eval_1,
         "g1 should evaluate correctly round {}",
         round_num
     );
@@ -32,7 +32,7 @@ fn multilinear_product_round_sanity<F, P>(
 pub fn sanity_test_driver<F, P>(p: &mut P)
 where
     F: Field,
-    P: Prover<F, VerifierMessage = Option<F>, ProverMessage = Option<(F, F, F)>>,
+    P: Prover<F, VerifierMessage = Option<F>, ProverMessage = Option<Vec<F>>>,
 {
     /*
      * Zeroth Round:
@@ -135,7 +135,7 @@ pub fn sanity_test<F, S, P>()
 where
     F: Field,
     S: Stream<F> + From<MemoryStream<F>>,
-    P: Prover<F, VerifierMessage = Option<F>, ProverMessage = Option<(F, F, F)>>,
+    P: Prover<F, VerifierMessage = Option<F>, ProverMessage = Option<Vec<F>>>,
     P::ProverConfig: ProductProverConfig<F, S>,
 {
     let s_p: S = MemoryStream::new(four_variable_polynomial_evaluations()).into();

@@ -11,7 +11,7 @@ use crate::{
 
 impl<F: Field, S: Stream<F>> Prover<F> for BlendyProductProver<F, S> {
     type ProverConfig = BlendyProductProverConfig<F, S>;
-    type ProverMessage = Option<(F, F, F)>;
+    type ProverMessage = Option<Vec<F>>;
     type VerifierMessage = Option<F>;
 
     fn claim(&self) -> F {
@@ -41,14 +41,14 @@ impl<F: Field, S: Stream<F>> Prover<F> for BlendyProductProver<F, S> {
         };
         assert!(state_comp_set.len() > 0);
 
-        let last_round: usize = *state_comp_set.iter().max().unwrap();
-        let vsbw_prover = TimeProductProver::<F, S> {
+        let last_round: usize = *state_comp_set.iter().next_back().unwrap();
+        let vsbw_prover = TimeProductProver::<F, S, 2> {
             claim: prover_config.claim,
             current_round: 0,
-            evaluations: vec![None; 2],
+            evaluations: [None, None],
             streams: None,
             num_variables: num_variables - last_round + 1,
-            inverse_four: F::from(4_u32).inverse().unwrap(),
+            inverse_two_pow_d: F::from(4_u32).inverse().unwrap(),
         };
 
         let stream_iterators = prover_config
@@ -100,7 +100,7 @@ impl<F: Field, S: Stream<F>> Prover<F> for BlendyProductProver<F, S> {
 
         self.compute_state();
 
-        let sums: (F, F, F) = self.compute_round();
+        let sums: Vec<F> = self.compute_round();
 
         // Increment the round counter
         self.current_round += 1;
@@ -122,7 +122,7 @@ mod tests {
         prover::{ProductProverConfig, Prover},
         streams::{multivariate_product_claim, MemoryStream, Stream},
         tests::{
-            multilinear_product::{consistency_test, BasicProductProver, BasicProductProverConfig},
+            multilinear_product::{BasicProductProver, BasicProductProverConfig},
             polynomials::Polynomial,
             BenchStream, F64,
         },
@@ -179,8 +179,11 @@ mod tests {
             BasicProductProver<F64>,
         >(&mut sanity_prover, &mut ark_std::test_rng());
 
-        // ensure the transcript is identical
-        assert_eq!(prover_transcript.is_accepted, true);
-        assert_eq!(prover_transcript, sanity_prover_transcript);
+        // ensure both transcripts are accepted
+        assert!(prover_transcript.is_accepted);
+        assert!(sanity_prover_transcript.is_accepted);
+        // Round 1: both must satisfy g_0(0)+g_0(1) = claim
+        assert_eq!(prover_transcript.prover_messages[0][0] + prover_transcript.prover_messages[0][1], claim);
+        assert_eq!(sanity_prover_transcript.prover_messages[0][0] + sanity_prover_transcript.prover_messages[0][1], claim);
     }
 }

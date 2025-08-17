@@ -6,9 +6,9 @@ use crate::{
     streams::Stream,
 };
 
-impl<F: Field, S: Stream<F>> Prover<F> for TimeProductProver<F, S> {
+impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for TimeProductProver<F, S, D> {
     type ProverConfig = TimeProductProverConfig<F, S>;
-    type ProverMessage = Option<(F, F, F)>;
+    type ProverMessage = Option<Vec<F>>;
     type VerifierMessage = Option<F>;
 
     fn claim(&self) -> F {
@@ -17,17 +17,26 @@ impl<F: Field, S: Stream<F>> Prover<F> for TimeProductProver<F, S> {
 
     fn new(prover_config: Self::ProverConfig) -> Self {
         let num_variables = prover_config.num_variables;
+        let streams_vec = prover_config.streams;
+        assert!(streams_vec.len() == D);
+        let streams_arr: [S; D] = streams_vec
+            .try_into()
+            .ok()
+            .expect("streams length must equal D");
         Self {
             claim: prover_config.claim,
             current_round: 0,
-            evaluations: vec![None; prover_config.streams.len()],
-            streams: Some(prover_config.streams),
+            evaluations: std::array::from_fn(|_| None),
+            streams: Some(streams_arr),
             num_variables,
-            inverse_four: F::from(4_u32).inverse().unwrap(),
+            inverse_two_pow_d: {
+                let two_pow_d: u64 = 1u64 << (D as u32);
+                F::from(two_pow_d).inverse().unwrap()
+            },
         }
     }
 
-    fn next_message(&mut self, verifier_message: Option<F>) -> Option<(F, F, F)> {
+    fn next_message(&mut self, verifier_message: Option<F>) -> Option<Vec<F>> {
         // Ensure the current round is within bounds
         if self.current_round >= self.total_rounds() {
             return None;
@@ -48,8 +57,8 @@ impl<F: Field, S: Stream<F>> Prover<F> for TimeProductProver<F, S> {
         // Increment the round counter
         self.current_round += 1;
 
-        // Return the computed polynomial
-        return Some(sums);
+        // Return the computed polynomial evaluations as a vector [t(0), t(1), t(1/2)] for D=2 compatibility
+        return Some(ark_std::vec![sums.0, sums.1, sums.2]);
     }
 }
 
@@ -62,6 +71,6 @@ mod tests {
 
     #[test]
     fn parity_with_basic_prover() {
-        consistency_test::<F64, BenchStream<F64>, TimeProductProver<F64, BenchStream<F64>>>();
+        consistency_test::<F64, BenchStream<F64>, TimeProductProver<F64, BenchStream<F64>, 2>>();
     }
 }

@@ -10,7 +10,7 @@ use crate::{
 
 impl<F: Field, S: Stream<F>> Prover<F> for SpaceProductProver<F, S> {
     type ProverConfig = SpaceProductProverConfig<F, S>;
-    type ProverMessage = Option<(F, F, F)>;
+    type ProverMessage = Option<Vec<F>>;
     type VerifierMessage = Option<F>;
 
     fn claim(&self) -> F {
@@ -48,7 +48,7 @@ impl<F: Field, S: Stream<F>> Prover<F> for SpaceProductProver<F, S> {
         }
 
         // evaluate using cty
-        let sums: (F, F, F) = self.cty_evaluate();
+        let sums: Vec<F> = self.cty_evaluate();
 
         // don't forget to increment the round
         self.current_round += 1;
