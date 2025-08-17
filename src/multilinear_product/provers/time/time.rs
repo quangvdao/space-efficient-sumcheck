@@ -23,11 +23,14 @@ impl<'a, F: Field, S: Stream<F>, const D: usize> TimeProductProver<F, S, D> {
      * Note in evaluate() there's an optimization for the first round where we read directly
      * from the streams (instead of the tables), which reduces max memory usage by 1/2
      */
-    pub fn vsbw_evaluate(&self) -> (F, F, F) {
-        // Initialize accumulators
-        let mut sum_0 = F::ZERO;
-        let mut sum_1 = F::ZERO;
-        let mut sum_half = F::ZERO;
+    pub fn vsbw_evaluate(&self) -> Vec<F> {
+        // Node set: [0, 1, 1/2, 2, 3, ..., D-1]
+        let mut nodes: Vec<F> = Vec::with_capacity(D + 1);
+        nodes.push(F::ZERO);
+        nodes.push(F::ONE);
+        nodes.push(F::from(2_u32).inverse().unwrap());
+        for k in 2..D { nodes.push(F::from(k as u32)); }
+        let mut sums: Vec<F> = vec![F::ZERO; nodes.len()];
 
         // Calculate the bitmask for the number of free variables
         let bitmask: usize = 1 << (self.num_free_variables() - 1);
@@ -43,9 +46,7 @@ impl<'a, F: Field, S: Stream<F>, const D: usize> TimeProductProver<F, S, D> {
 
         // Iterate through evaluations
         for i in 0..(evaluations_len / 2) {
-            let mut prod0 = F::ONE;
-            let mut prod1 = F::ONE;
-            let mut prod_half = F::ONE;
+            let mut prod_for_node: Vec<F> = vec![F::ONE; nodes.len()];
 
             for j in 0..D {
                 let v0 = match &self.evaluations[j] {
@@ -62,19 +63,24 @@ impl<'a, F: Field, S: Stream<F>, const D: usize> TimeProductProver<F, S, D> {
                     },
                     Some(evals) => evals[i | bitmask],
                 };
-                prod0 *= v0;
-                prod1 *= v1;
-                prod_half *= v0 + v1;
+                // 0 and 1
+                prod_for_node[0] *= v0;
+                prod_for_node[1] *= v1;
+                // 1/2
+                prod_for_node[2] *= v0 + v1;
+                // extra nodes
+                for (idx, z) in nodes.iter().enumerate().skip(3) {
+                    let val = (F::ONE - *z) * v0 + *z * v1;
+                    prod_for_node[idx] *= val;
+                }
             }
-
-            sum_0 += prod0;
-            sum_1 += prod1;
-            sum_half += prod_half;
+            for idx in 0..nodes.len() { sums[idx] += prod_for_node[idx]; }
         }
 
-        sum_half = sum_half * self.inverse_two_pow_d;
+        // scale 1/2 node
+        if nodes.len() > 2 { sums[2] = sums[2] * self.inverse_two_pow_d; }
 
-        (sum_0, sum_1, sum_half)
+        sums
     }
     pub fn vsbw_reduce_evaluations(&mut self, verifier_message: F, verifier_message_hat: F) {
         for i in 0..D {

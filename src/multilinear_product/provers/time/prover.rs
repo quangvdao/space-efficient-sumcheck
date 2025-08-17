@@ -57,8 +57,8 @@ impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for TimeProductProver<F, 
         // Increment the round counter
         self.current_round += 1;
 
-        // Return the computed polynomial evaluations as a vector [t(0), t(1), t(1/2)] for D=2 compatibility
-        return Some(ark_std::vec![sums.0, sums.1, sums.2]);
+        // Return the computed polynomial evaluations as a vector
+        return Some(sums);
     }
 }
 

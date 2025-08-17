@@ -8,7 +8,7 @@ use crate::{
     streams::{Stream, StreamIterator},
 };
 
-impl<F: Field, S: Stream<F>> Prover<F> for SpaceProductProver<F, S> {
+impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for SpaceProductProver<F, S, D> {
     type ProverConfig = SpaceProductProverConfig<F, S>;
     type ProverMessage = Option<Vec<F>>;
     type VerifierMessage = Option<F>;
@@ -18,20 +18,25 @@ impl<F: Field, S: Stream<F>> Prover<F> for SpaceProductProver<F, S> {
     }
 
     fn new(prover_config: Self::ProverConfig) -> Self {
-        let stream_iterators = prover_config
-            .streams
-            .iter()
-            .cloned()
+        let streams_vec = prover_config.streams;
+        assert!(streams_vec.len() == D, "streams length must equal D");
+        let iters_vec: Vec<StreamIterator<F, S, SignificantBitOrder>> = streams_vec
+            .into_iter()
             .map(|s| StreamIterator::<F, S, SignificantBitOrder>::new(s))
             .collect();
+        let stream_iterators: [StreamIterator<F, S, SignificantBitOrder>; D] = iters_vec
+            .try_into()
+            .ok()
+            .expect("streams length must equal D");
 
         Self {
             claim: prover_config.claim,
-            stream_iterators: stream_iterators,
+            stream_iterators,
             verifier_messages: VerifierMessages::new(&vec![]),
             current_round: 0,
             num_variables: prover_config.num_variables,
             inverse_four: F::from(4_u32).inverse().unwrap(),
+            inverse_two_pow_d: F::from(1u64 << (D as u32)).inverse().unwrap(),
         }
     }
 
@@ -67,6 +72,6 @@ mod tests {
 
     #[test]
     fn sumcheck() {
-        sanity_test::<F19, MemoryStream<F19>, SpaceProductProver<F19, MemoryStream<F19>>>();
+        sanity_test::<F19, MemoryStream<F19>, SpaceProductProver<F19, MemoryStream<F19>, 2>>();
     }
 }

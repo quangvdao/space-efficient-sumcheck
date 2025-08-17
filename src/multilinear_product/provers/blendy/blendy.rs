@@ -10,11 +10,11 @@ use ark_ff::Field;
 use ark_std::vec::Vec;
 use std::collections::BTreeSet;
 
-pub struct BlendyProductProver<F: Field, S: Stream<F>> {
+pub struct BlendyProductProver<F: Field, S: Stream<F>, const D: usize> {
     pub claim: F,
     pub current_round: usize,
-    pub streams: Vec<S>,
-    pub stream_iterators: Vec<StreamIterator<F, S, SignificantBitOrder>>,
+    pub streams: [S; D],
+    pub stream_iterators: [StreamIterator<F, S, SignificantBitOrder>; D],
     pub num_stages: usize,
     pub num_variables: usize,
     pub last_round_phase1: usize,
@@ -22,17 +22,20 @@ pub struct BlendyProductProver<F: Field, S: Stream<F>> {
     pub verifier_messages_round_comp: VerifierMessages<F>,
     pub x_table: Vec<F>,
     pub y_table: Vec<F>,
-    pub j_prime_table: Vec<Vec<F>>,
+    pub j_prime_table: Vec<Vec<F>>, // used when D==2
+    pub partial_tables: Option<[Vec<F>; D]>, // used when D>2
+    pub j_prime_table_flat: Option<Vec<F>>,   // used when D>2
     pub stage_size: usize,
     pub inverse_four: F,
     pub prev_table_round_num: usize,
     pub prev_table_size: usize,
     pub state_comp_set: BTreeSet<usize>,
     pub switched_to_vsbw: bool,
-    pub vsbw_prover: TimeProductProver<F, S, 2>,
+    pub vsbw_prover: TimeProductProver<F, S, D>,
+    pub inverse_two_pow_d: F,
 }
 
-impl<F: Field, S: Stream<F>> BlendyProductProver<F, S> {
+impl<F: Field, S: Stream<F>, const D: usize> BlendyProductProver<F, S, D> {
     pub fn is_initial_round(&self) -> bool {
         self.current_round == 0
     }
@@ -59,21 +62,22 @@ impl<F: Field, S: Stream<F>> BlendyProductProver<F, S> {
     }
 
     pub fn compute_round(&mut self) -> Vec<F> {
-        let mut sum_0 = F::ZERO;
-        let mut sum_1 = F::ZERO;
-        let mut sum_half = F::ZERO;
+        // Build node set: [0, 1, 1/2, 2, 3, ..., D-1]
+        let mut nodes: Vec<F> = Vec::with_capacity(D + 1);
+        nodes.push(F::ZERO);
+        nodes.push(F::ONE);
+        nodes.push(F::from(2_u32).inverse().unwrap());
+        for k in 2..D {
+            nodes.push(F::from(k as u32));
+        }
+        let mut sums: Vec<F> = vec![F::ZERO; nodes.len()];
 
         // in the last rounds, we switch to the memory intensive prover
         if self.switched_to_vsbw {
-            let (s0, s1, sh) = self.vsbw_prover.vsbw_evaluate();
-            sum_0 = s0;
-            sum_1 = s1;
-            sum_half = sh;
+            sums = self.vsbw_prover.vsbw_evaluate();
         }
         // if first few rounds, then no table is computed, need to compute sums from the streams
         else if self.current_round + 1 <= self.last_round_phase1 {
-            // let time1 = std::time::Instant::now();
-
             // Lag Poly
             let mut sequential_lag_poly: LagrangePolynomial<F, SignificantBitOrder> =
                 LagrangePolynomial::new(&self.verifier_messages_round_comp);
@@ -88,94 +92,191 @@ impl<F: Field, S: Stream<F>> BlendyProductProver<F, S> {
             for (x_index, _) in
                 Hypercube::<SignificantBitOrder>::new(self.num_variables - self.current_round - 1)
             {
-                // can avoid unnecessary additions for first round since there is no lag poly: gives a small speedup
                 if self.is_initial_round() {
-                    let p0 = self.stream_iterators[0].next().unwrap();
-                    let p1 = self.stream_iterators[0].next().unwrap();
-                    let q0 = self.stream_iterators[1].next().unwrap();
-                    let q1 = self.stream_iterators[1].next().unwrap();
-                    sum_0 += p0 * q0;
-                    sum_1 += p1 * q1;
-                    sum_half += (p0 + p1) * (q0 + q1);
+                    let mut prod_for_node: Vec<F> = vec![F::ONE; nodes.len()];
+                    for j in 0..D {
+                        let v0 = self.stream_iterators[j].next().unwrap();
+                        let v1 = self.stream_iterators[j].next().unwrap();
+                        // 0,1
+                        prod_for_node[0] *= v0;
+                        prod_for_node[1] *= v1;
+                        // 1/2
+                        prod_for_node[2] *= v0 + v1;
+                        // extra nodes
+                        for (idx, z) in nodes.iter().enumerate().skip(3) {
+                            let val = (F::ONE - *z) * v0 + *z * v1;
+                            prod_for_node[idx] *= val;
+                        }
+                    }
+                    sums.iter_mut().zip(prod_for_node).for_each(|(s, p)| *s += p);
                 } else {
-                    let mut partial_sum_p_0 = F::ZERO;
-                    let mut partial_sum_p_1 = F::ZERO;
-                    let mut partial_sum_q_0 = F::ZERO;
-                    let mut partial_sum_q_1 = F::ZERO;
-                    for (b_index, _) in Hypercube::<SignificantBitOrder>::new(self.current_round) {
-                        if x_index == 0 {
+                    if x_index == 0 {
+                        for (b_index, _) in Hypercube::<SignificantBitOrder>::new(self.current_round)
+                        {
                             lag_polys[b_index] = sequential_lag_poly.next().unwrap();
                         }
-                        let lag_poly = lag_polys[b_index];
-                        partial_sum_p_0 += self.stream_iterators[0].next().unwrap() * lag_poly;
-                        partial_sum_q_0 += self.stream_iterators[1].next().unwrap() * lag_poly;
                     }
+                    let mut partial_0: [F; D] = [F::ZERO; D];
                     for (b_index, _) in Hypercube::<SignificantBitOrder>::new(self.current_round) {
                         let lag_poly = lag_polys[b_index];
-                        partial_sum_p_1 += self.stream_iterators[0].next().unwrap() * lag_poly;
-                        partial_sum_q_1 += self.stream_iterators[1].next().unwrap() * lag_poly;
+                        for j in 0..D {
+                            partial_0[j] += self.stream_iterators[j].next().unwrap() * lag_poly;
+                        }
                     }
-
-                    sum_0 += partial_sum_p_0 * partial_sum_q_0;
-                    sum_1 += partial_sum_p_1 * partial_sum_q_1;
-                    sum_half +=
-                        (partial_sum_p_0 + partial_sum_p_1) * (partial_sum_q_0 + partial_sum_q_1);
+                    let mut partial_1: [F; D] = [F::ZERO; D];
+                    for (b_index, _) in Hypercube::<SignificantBitOrder>::new(self.current_round) {
+                        let lag_poly = lag_polys[b_index];
+                        for j in 0..D {
+                            partial_1[j] += self.stream_iterators[j].next().unwrap() * lag_poly;
+                        }
+                    }
+                    let mut prod_for_node: Vec<F> = vec![F::ONE; nodes.len()];
+                    for j in 0..D {
+                        prod_for_node[0] *= partial_0[j];
+                        prod_for_node[1] *= partial_1[j];
+                        prod_for_node[2] *= partial_0[j] + partial_1[j];
+                        for (idx, z) in nodes.iter().enumerate().skip(3) {
+                            let val = (F::ONE - *z) * partial_0[j] + *z * partial_1[j];
+                            prod_for_node[idx] *= val;
+                        }
+                    }
+                    sums.iter_mut().zip(prod_for_node).for_each(|(s, p)| *s += p);
                 }
             }
-            sum_half = sum_half * self.inverse_four;
-            // let time2 = std::time::Instant::now();
-            // println!("round computation from stream took: {:?}", time2 - time1);
+            // scale 1/2 node by 1/2^D
+            sums[2] = sums[2] * self.inverse_two_pow_d;
         }
         // computing evaluations from the cross product tables
         else {
-            // things to help iterating
-            let b_prime_num_vars = self.current_round + 1 - self.prev_table_round_num;
-            let v_num_vars: usize =
-                self.prev_table_size + self.prev_table_round_num - self.current_round - 2;
-            let b_prime_index_left_shift = v_num_vars + 1;
+            if D == 2 {
+                // things to help iterating
+                let b_prime_num_vars = self.current_round + 1 - self.prev_table_round_num;
+                let v_num_vars: usize =
+                    self.prev_table_size + self.prev_table_round_num - self.current_round - 2;
+                let b_prime_index_left_shift = v_num_vars + 1;
 
-            // Lag Poly
-            let mut sequential_lag_poly: LagrangePolynomial<F, GraycodeOrder> =
-                LagrangePolynomial::new(&self.verifier_messages_round_comp);
-            let lag_polys_len = Hypercube::<GraycodeOrder>::stop_value(b_prime_num_vars);
-            let mut lag_polys: Vec<F> = vec![F::ONE; lag_polys_len];
+                // Lag Poly
+                let mut sequential_lag_poly: LagrangePolynomial<F, GraycodeOrder> =
+                    LagrangePolynomial::new(&self.verifier_messages_round_comp);
+                let lag_polys_len = Hypercube::<GraycodeOrder>::stop_value(b_prime_num_vars);
+                let mut lag_polys: Vec<F> = vec![F::ONE; lag_polys_len];
 
-            // Sums
-            for (b_prime_index, _) in Hypercube::<GraycodeOrder>::new(b_prime_num_vars) {
-                for (b_prime_prime_index, _) in Hypercube::<GraycodeOrder>::new(b_prime_num_vars) {
-                    // doing it like this, for each hypercube member lag_poly is computed exactly once
-                    if b_prime_index == 0 {
-                        lag_polys[b_prime_prime_index] = sequential_lag_poly.next().unwrap();
-                    }
+                // Sums
+                for (b_prime_index, _) in Hypercube::<GraycodeOrder>::new(b_prime_num_vars) {
+                    for (b_prime_prime_index, _) in Hypercube::<GraycodeOrder>::new(b_prime_num_vars)
+                    {
+                        // doing it like this, for each hypercube member lag_poly is computed exactly once
+                        if b_prime_index == 0 {
+                            lag_polys[b_prime_prime_index] = sequential_lag_poly.next().unwrap();
+                        }
 
-                    let lag_poly_1 = lag_polys[b_prime_index];
-                    let lag_poly_2 = lag_polys[b_prime_prime_index];
-                    let lag_poly = lag_poly_1 * lag_poly_2;
-                    for (v_index, _) in Hypercube::<GraycodeOrder>::new(v_num_vars) {
-                        let b_prime_0_v =
-                            b_prime_index << b_prime_index_left_shift | 0 << v_num_vars | v_index;
-                        let b_prime_prime_0_v = b_prime_prime_index << b_prime_index_left_shift
-                            | 0 << v_num_vars
-                            | v_index;
-                        let b_prime_1_v =
-                            b_prime_index << b_prime_index_left_shift | 1 << v_num_vars | v_index;
-                        let b_prime_prime_1_v = b_prime_prime_index << b_prime_index_left_shift
-                            | 1 << v_num_vars
-                            | v_index;
+                        let lag_poly_1 = lag_polys[b_prime_index];
+                        let lag_poly_2 = lag_polys[b_prime_prime_index];
+                        let lag_poly = lag_poly_1 * lag_poly_2;
+                        for (v_index, _) in Hypercube::<GraycodeOrder>::new(v_num_vars) {
+                            let b_prime_0_v =
+                                b_prime_index << b_prime_index_left_shift | 0 << v_num_vars | v_index;
+                            let b_prime_prime_0_v = b_prime_prime_index << b_prime_index_left_shift
+                                | 0 << v_num_vars
+                                | v_index;
+                            let b_prime_1_v =
+                                b_prime_index << b_prime_index_left_shift | 1 << v_num_vars | v_index;
+                            let b_prime_prime_1_v = b_prime_prime_index << b_prime_index_left_shift
+                                | 1 << v_num_vars
+                                | v_index;
 
-                        sum_0 += lag_poly * self.j_prime_table[b_prime_0_v][b_prime_prime_0_v];
-                        sum_1 += lag_poly * self.j_prime_table[b_prime_1_v][b_prime_prime_1_v];
-                        sum_half += lag_poly
-                            * (self.j_prime_table[b_prime_0_v][b_prime_prime_0_v]
-                                + self.j_prime_table[b_prime_0_v][b_prime_prime_1_v]
-                                + self.j_prime_table[b_prime_1_v][b_prime_prime_0_v]
-                                + self.j_prime_table[b_prime_1_v][b_prime_prime_1_v]);
+                            sums[0] +=
+                                lag_poly * self.j_prime_table[b_prime_0_v][b_prime_prime_0_v];
+                            sums[1] +=
+                                lag_poly * self.j_prime_table[b_prime_1_v][b_prime_prime_1_v];
+                            sums[2] += lag_poly
+                                * (self.j_prime_table[b_prime_0_v][b_prime_prime_0_v]
+                                    + self.j_prime_table[b_prime_0_v][b_prime_prime_1_v]
+                                    + self.j_prime_table[b_prime_1_v][b_prime_prime_0_v]
+                                    + self.j_prime_table[b_prime_1_v][b_prime_prime_1_v]);
+                        }
                     }
                 }
+                sums[2] = sums[2] * self.inverse_four;
+            } else {
+                // D>2: consume from flat D-way cross product table
+                let b_prime_num_vars = self.current_round + 1 - self.prev_table_round_num;
+                let v_num_vars: usize =
+                    self.prev_table_size + self.prev_table_round_num - self.current_round - 2;
+                let shift = v_num_vars + 1;
+                let side: usize = 1usize << (b_prime_num_vars + v_num_vars + 1);
+                let table = self.j_prime_table_flat.as_ref().expect("flat table must exist");
+
+                // Precompute lagrange weights over b_prime_num_vars for Graycode order
+                let mut sequential_lag_poly: LagrangePolynomial<F, GraycodeOrder> =
+                    LagrangePolynomial::new(&self.verifier_messages_round_comp);
+                let lag_len = 1usize << b_prime_num_vars;
+                let mut lag_vec: Vec<F> = vec![F::ONE; lag_len];
+                for idx in 0..lag_len {
+                    lag_vec[idx] = sequential_lag_poly.next().unwrap();
+                }
+
+                // Iterate b_prime indices for each dimension using mixed-radix counters
+                let mut b_idxs = vec![0usize; D];
+                loop {
+                    // product of lagrange weights across dims
+                    let mut lag_prod = F::ONE;
+                    for j in 0..D { lag_prod *= lag_vec[b_idxs[j]]; }
+
+                    // sum over v for node 0 and 1 directly
+                    for v_index in 0..(1usize << v_num_vars) {
+                        // node 0 and 1 fused indices per dim
+                        let mut base0: Vec<usize> = Vec::with_capacity(D);
+                        let mut base1: Vec<usize> = Vec::with_capacity(D);
+                        for j in 0..D {
+                            let fused0 = (b_idxs[j] << shift) | (0usize << v_num_vars) | v_index;
+                            let fused1 = (b_idxs[j] << shift) | (1usize << v_num_vars) | v_index;
+                            base0.push(fused0);
+                            base1.push(fused1);
+                        }
+                        // flat index for tuple in row-major base 'side'
+                        let mut idx0 = 0usize; let mut mul = 1usize;
+                        for j in 0..D { idx0 += base0[j] * mul; mul *= side; }
+                        let mut idx1 = 0usize; let mut mul2 = 1usize;
+                        for j in 0..D { idx1 += base1[j] * mul2; mul2 *= side; }
+                        sums[0] += lag_prod * table[idx0];
+                        sums[1] += lag_prod * table[idx1];
+
+                        // other nodes including 1/2: sum over s ∈ {0,1}^D with weights
+                        // Precompute slice values for s
+                        for node_idx in 2..nodes.len() {
+                            let z = nodes[node_idx];
+                            // iterate s
+                            let mut s_mask = 0usize;
+                            loop {
+                                let mut weight = F::ONE;
+                                let mut flat_idx = 0usize; let mut m = 1usize;
+                                for j in 0..D {
+                                    let sj = (s_mask >> j) & 1;
+                                    weight *= if sj == 0 { F::ONE - z } else { z };
+                                    let fused = (b_idxs[j] << shift) | (sj << v_num_vars) | v_index;
+                                    flat_idx += fused * m;
+                                    m *= side;
+                                }
+                                sums[node_idx] += lag_prod * weight * table[flat_idx];
+                                s_mask += 1;
+                                if s_mask >= (1usize << D) { break; }
+                            }
+                        }
+                    }
+
+                    // increment b_idxs in base 2^{b_prime_num_vars}
+                    let mut k = 0usize;
+                    while k < D {
+                        b_idxs[k] += 1;
+                        if b_idxs[k] < lag_len { break; }
+                        b_idxs[k] = 0; k += 1;
+                    }
+                    if k == D { break; }
+                }
             }
-            sum_half = sum_half * self.inverse_four;
         }
-        ark_std::vec![sum_0, sum_1, sum_half]
+        sums
     }
 
     pub fn compute_state(&mut self) {
@@ -192,9 +293,18 @@ impl<F: Field, S: Stream<F>> BlendyProductProver<F, S> {
             //     j, j_prime, t
             // );
 
-            // zero out the table
+            // zero out the table(s)
             let table_len = Hypercube::<SignificantBitOrder>::stop_value(t);
-            self.j_prime_table = vec![vec![F::ZERO; table_len]; table_len];
+            if D == 2 {
+                self.j_prime_table = vec![vec![F::ZERO; table_len]; table_len];
+            } else {
+                // D-way flat tensor of size (2^t)^D
+                let side = table_len;
+                let total = side.pow(D as u32);
+                self.j_prime_table_flat = Some(vec![F::ZERO; total]);
+                // scratch partial tables per poly
+                self.partial_tables = Some(std::array::from_fn(|_| vec![F::ZERO; side]));
+            }
 
             // basically, this needs to get "zeroed" out at the beginning of state computation
             self.verifier_messages_round_comp = VerifierMessages::new_from_self(
@@ -224,27 +334,69 @@ impl<F: Field, S: Stream<F>> BlendyProductProver<F, S> {
                 .iter_mut()
                 .for_each(|stream_it| stream_it.reset());
 
-            // Ensure x_table and y_table are initialized with the correct size
-            self.x_table = vec![F::ZERO; Hypercube::<SignificantBitOrder>::stop_value(t)];
-            self.y_table = vec![F::ZERO; Hypercube::<SignificantBitOrder>::stop_value(t)];
+            // Ensure x_table and y_table or partial tables are initialized
+            if D == 2 {
+                self.x_table = vec![F::ZERO; table_len];
+                self.y_table = vec![F::ZERO; table_len];
+            }
 
             for (_, _) in Hypercube::<SignificantBitOrder>::new(b_num_vars) {
-                for (b_prime_index, _) in Hypercube::<SignificantBitOrder>::new(t) {
-                    self.x_table[b_prime_index] = F::ZERO;
-                    self.y_table[b_prime_index] = F::ZERO;
+                if D == 2 {
+                    for (b_prime_index, _) in Hypercube::<SignificantBitOrder>::new(t) {
+                        self.x_table[b_prime_index] = F::ZERO;
+                        self.y_table[b_prime_index] = F::ZERO;
 
-                    for (x_index, _) in Hypercube::<SignificantBitOrder>::new(x_num_vars) {
-                        self.x_table[b_prime_index] +=
-                            lag_polys[x_index] * self.stream_iterators[0].next().unwrap();
-                        self.y_table[b_prime_index] +=
-                            lag_polys[x_index] * self.stream_iterators[1].next().unwrap();
+                        for (x_index, _) in Hypercube::<SignificantBitOrder>::new(x_num_vars) {
+                            self.x_table[b_prime_index] +=
+                                lag_polys[x_index] * self.stream_iterators[0].next().unwrap();
+                            self.y_table[b_prime_index] +=
+                                lag_polys[x_index] * self.stream_iterators[1].next().unwrap();
+                        }
                     }
-                }
-                for (b_prime_index, _) in Hypercube::<SignificantBitOrder>::new(t) {
-                    for (b_prime_prime_index, _) in Hypercube::<SignificantBitOrder>::new(t) {
-                        self.j_prime_table[b_prime_index][b_prime_prime_index] +=
-                            self.x_table[b_prime_index] * self.y_table[b_prime_prime_index];
+                    for (b_prime_index, _) in Hypercube::<SignificantBitOrder>::new(t) {
+                        for (b_prime_prime_index, _) in Hypercube::<SignificantBitOrder>::new(t) {
+                            self.j_prime_table[b_prime_index][b_prime_prime_index] +=
+                                self.x_table[b_prime_index] * self.y_table[b_prime_prime_index];
+                        }
                     }
+                } else {
+                    // D>2: fill partial tables per poly then take D-way outer product into flat tensor
+                    let side = table_len;
+                    let mut partials = self.partial_tables.take().unwrap();
+                    for j in 0..D {
+                        for (b_prime_index, _) in Hypercube::<SignificantBitOrder>::new(t) {
+                            partials[j][b_prime_index] = F::ZERO;
+                            for (x_index, _) in Hypercube::<SignificantBitOrder>::new(x_num_vars) {
+                                partials[j][b_prime_index] +=
+                                    lag_polys[x_index] * self.stream_iterators[j].next().unwrap();
+                            }
+                        }
+                    }
+                    // Outer product accumulation
+                    let flat = self.j_prime_table_flat.as_mut().unwrap();
+                    // Iterate over all tuples (i0,..,i_{D-1})
+                    let mut idxs = vec![0usize; D];
+                    loop {
+                        let mut prod = F::ONE;
+                        for j in 0..D { prod *= partials[j][idxs[j]]; }
+                        // flat index: Σ idxs[j] * side^j
+                        let mut flat_idx = 0usize;
+                        let mut mult = 1usize;
+                        for j in 0..D {
+                            flat_idx += idxs[j] * mult;
+                            mult *= side;
+                        }
+                        flat[flat_idx] += prod;
+                        // increment idxs in mixed radix base 'side'
+                        let mut k = 0usize;
+                        while k < D {
+                            idxs[k] += 1;
+                            if idxs[k] < side { break; }
+                            idxs[k] = 0; k += 1;
+                        }
+                        if k == D { break; }
+                    }
+                    self.partial_tables = Some(partials);
                 }
             }
             // let time2 = std::time::Instant::now();

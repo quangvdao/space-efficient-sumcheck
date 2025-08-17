@@ -9,7 +9,7 @@ use crate::{
     streams::{Stream, StreamIterator},
 };
 
-impl<F: Field, S: Stream<F>> Prover<F> for BlendyProductProver<F, S> {
+impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for BlendyProductProver<F, S, D> {
     type ProverConfig = BlendyProductProverConfig<F, S>;
     type ProverMessage = Option<Vec<F>>;
     type VerifierMessage = Option<F>;
@@ -42,27 +42,37 @@ impl<F: Field, S: Stream<F>> Prover<F> for BlendyProductProver<F, S> {
         assert!(state_comp_set.len() > 0);
 
         let last_round: usize = *state_comp_set.iter().next_back().unwrap();
-        let vsbw_prover = TimeProductProver::<F, S, 2> {
+        let two_pow_d: u64 = 1u64 << (D as u32);
+        let vsbw_prover = TimeProductProver::<F, S, D> {
             claim: prover_config.claim,
             current_round: 0,
-            evaluations: [None, None],
+            evaluations: std::array::from_fn(|_| None),
             streams: None,
             num_variables: num_variables - last_round + 1,
-            inverse_two_pow_d: F::from(4_u32).inverse().unwrap(),
+            inverse_two_pow_d: F::from(two_pow_d).inverse().unwrap(),
         };
 
-        let stream_iterators = prover_config
-            .streams
+        let streams_vec = prover_config.streams;
+        assert!(streams_vec.len() == D, "requires exactly D streams");
+        let stream_iterators: [StreamIterator<F, S, SignificantBitOrder>; D] = streams_vec
             .iter()
             .cloned()
             .map(|s| StreamIterator::<F, S, SignificantBitOrder>::new(s))
-            .collect();
+            .collect::<Vec<_>>()
+            .try_into()
+            .ok()
+            .expect("requires exactly D streams");
+        let streams: [S; D] = streams_vec
+            .try_into()
+            .ok()
+            .expect("requires exactly D streams");
         // return the BlendyProver instance
         Self {
             claim: prover_config.claim,
             current_round: 0,
-            streams: prover_config.streams,
+            streams,
             stream_iterators,
+            inverse_two_pow_d: F::from(1u64 << (D as u32)).inverse().unwrap(),
             num_stages,
             num_variables,
             last_round_phase1,
@@ -71,6 +81,8 @@ impl<F: Field, S: Stream<F>> Prover<F> for BlendyProductProver<F, S> {
             x_table: vec![],
             y_table: vec![],
             j_prime_table: vec![],
+            partial_tables: None,
+            j_prime_table_flat: None,
             stage_size,
             inverse_four: F::from(4_u32).inverse().unwrap(),
             prev_table_round_num: 0,
@@ -153,7 +165,7 @@ mod tests {
         // get transcript from Blendy prover
         let prover_transcript: ProductSumcheck<F64> = ProductSumcheck::<F64>::prove::<
             MemoryStream<F64>,
-            BlendyProductProver<F64, MemoryStream<F64>>,
+            BlendyProductProver<F64, MemoryStream<F64>, 2>,
         >(
             &mut Prover::<F64>::new(BlendyProductProverConfig::default(
                 claim,
