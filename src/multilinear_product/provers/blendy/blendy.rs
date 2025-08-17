@@ -416,23 +416,24 @@ impl<F: Field, S: Stream<F>, const D: usize> BlendyProductProver<F, S, D> {
                 .iter_mut()
                 .for_each(|stream_it| stream_it.reset());
 
-            // initialize the evaluations for the memory-intensive implementation for the final rounds of the protocol
-            let mut evaluations_p = vec![F::ZERO; 1 << num_variables_new];
-            let mut evaluations_q = vec![F::ZERO; 1 << num_variables_new];
+            // initialize the evaluations for the memory-intensive implementation for all D polynomials
+            let side = 1 << num_variables_new;
+            let mut evals: [Vec<F>; D] = std::array::from_fn(|_| vec![F::ZERO; side]);
 
             for (b_prime_index, _) in Hypercube::<SignificantBitOrder>::new(num_variables_new) {
                 let mut sequential_lag_poly: LagrangePolynomial<F, SignificantBitOrder> =
                     LagrangePolynomial::new(&self.verifier_messages);
                 for (_, _) in Hypercube::<SignificantBitOrder>::new(j - 1) {
                     let lag_poly = sequential_lag_poly.next().unwrap();
-                    evaluations_p[b_prime_index] +=
-                        lag_poly * self.stream_iterators[0].next().unwrap();
-                    evaluations_q[b_prime_index] +=
-                        lag_poly * self.stream_iterators[1].next().unwrap();
+                    for t in 0..D {
+                        evals[t][b_prime_index] +=
+                            lag_poly * self.stream_iterators[t].next().unwrap();
+                    }
                 }
             }
-            self.vsbw_prover.evaluations[0] = Some(evaluations_p);
-            self.vsbw_prover.evaluations[1] = Some(evaluations_q);
+            for t in 0..D {
+                self.vsbw_prover.evaluations[t] = Some(std::mem::take(&mut evals[t]));
+            }
         } else if self.switched_to_vsbw {
             let verifier_message = self.verifier_messages.messages[self.current_round - 1];
             self.vsbw_prover

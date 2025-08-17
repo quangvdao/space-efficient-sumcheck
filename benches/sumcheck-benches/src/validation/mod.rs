@@ -20,6 +20,7 @@ pub struct BenchArgs {
     pub algorithm_label: AlgorithmLabel,
     pub num_variables: usize,
     pub stage_size: usize,
+    pub d: usize,
 }
 
 fn check_if_number(input_string: String) -> bool {
@@ -31,9 +32,9 @@ fn check_if_number(input_string: String) -> bool {
 
 pub fn validate_and_format_command_line_args(argsv: Vec<String>) -> BenchArgs {
     // Check if the correct number of command line arguments is provided
-    if argsv.len() != 5 {
+    if !(argsv.len() == 5 || argsv.len() == 6) {
         eprintln!(
-            "Usage: {} field_label algorithm_label num_variables stage_size",
+            "Usage: {} field_label algorithm_label num_variables stage_size [d]",
             argsv[0]
         );
         std::process::exit(1);
@@ -46,10 +47,7 @@ pub fn validate_and_format_command_line_args(argsv: Vec<String>) -> BenchArgs {
         || argsv[1] == "ProductVSBW"
         || argsv[1] == "ProductCTY")
     {
-        eprintln!(
-            "Usage: {} field_label algorithm_label num_variables stage_size",
-            argsv[0]
-        );
+        eprintln!("Usage: {} field_label algorithm_label num_variables stage_size [d]", argsv[0]);
         eprintln!("Invalid input: algorithm_label must be one of (CTY, VSBW, Blendy, ProductVSBW, ProductBlendy, ProductCTY)");
         std::process::exit(1);
     }
@@ -63,10 +61,7 @@ pub fn validate_and_format_command_line_args(argsv: Vec<String>) -> BenchArgs {
     };
     // field_label
     if !(argsv[2] == "Field64" || argsv[2] == "Field128" || argsv[2] == "FieldBn254") {
-        eprintln!(
-            "Usage: {} field_label algorithm_label num_variables stage_size",
-            argsv[0]
-        );
+        eprintln!("Usage: {} field_label algorithm_label num_variables stage_size [d]", argsv[0]);
         eprintln!("Invalid input: field_label must be one of (Field64, Field128, FieldBn254)");
         std::process::exit(1);
     }
@@ -77,28 +72,33 @@ pub fn validate_and_format_command_line_args(argsv: Vec<String>) -> BenchArgs {
     };
     // num_variables
     if !check_if_number(argsv[3].clone()) {
-        eprintln!(
-            "Usage: {} field_label algorithm_label num_variables stage_size",
-            argsv[0]
-        );
+        eprintln!("Usage: {} field_label algorithm_label num_variables stage_size [d]", argsv[0]);
         eprintln!("Invalid input: num_variables must be a number");
         std::process::exit(1);
     }
     let num_variables = argsv[3].clone().parse::<usize>().unwrap();
     // stage_size
     if !check_if_number(argsv[4].clone()) {
-        eprintln!(
-            "Usage: {} field_label algorithm_label num_variables stage_size",
-            argsv[0]
-        );
+        eprintln!("Usage: {} field_label algorithm_label num_variables stage_size [d]", argsv[0]);
         eprintln!("Invalid input: stage_size must be a number");
         std::process::exit(1);
     }
     let stage_size = argsv[4].clone().parse::<usize>().unwrap();
+    // optional d
+    let d = if argsv.len() == 6 {
+        if !check_if_number(argsv[5].clone()) {
+            eprintln!("Invalid input: d must be a number");
+            std::process::exit(1);
+        }
+        argsv[5].clone().parse::<usize>().unwrap()
+    } else {
+        2
+    };
     return BenchArgs {
         field_label,
         algorithm_label,
         num_variables,
         stage_size,
+        d,
     };
 }

@@ -1,4 +1,5 @@
 mod consistency;
+mod generic_d;
 mod provers;
 mod sanity;
 

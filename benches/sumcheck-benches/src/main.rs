@@ -70,48 +70,78 @@ fn run_on_field<F: Field>(bench_args: BenchArgs) {
         AlgorithmLabel::ProductVSBW => {
             let config: TimeProductProverConfig<F, BenchStream<F>> =
                 TimeProductProverConfig::<F, BenchStream<F>> {
-                    claim: multivariate_product_claim(vec![s.clone(), s.clone()]),
+                    claim: multivariate_product_claim(vec![s.clone(); bench_args.d]),
                     num_variables: bench_args.num_variables,
-                    streams: vec![s.clone(), s],
+                    streams: vec![s.clone(); bench_args.d],
                 };
-            let transcript = ProductSumcheck::<F>::prove::<
-                BenchStream<F>,
-                TimeProductProver<F, BenchStream<F>, 2>,
-            >(
-                &mut TimeProductProver::<F, BenchStream<F>, 2>::new(config),
-                &mut rng,
-            );
-            assert!(transcript.is_accepted);
+            match bench_args.d {
+                2 => {
+                    let transcript = ProductSumcheck::<F>::prove::<
+                        BenchStream<F>,
+                        TimeProductProver<F, BenchStream<F>, 2>,
+                    >(
+                        &mut TimeProductProver::<F, BenchStream<F>, 2>::new(config),
+                        &mut rng,
+                    );
+                    assert!(transcript.is_accepted);
+                }
+                3 => {
+                    let transcript = ProductSumcheck::<F>::prove::<
+                        BenchStream<F>,
+                        TimeProductProver<F, BenchStream<F>, 3>,
+                    >(
+                        &mut TimeProductProver::<F, BenchStream<F>, 3>::new(config),
+                        &mut rng,
+                    );
+                    assert!(transcript.is_accepted);
+                }
+                _ => panic!("Unsupported d value: {}", bench_args.d),
+            }
         }
         AlgorithmLabel::ProductBlendy => {
             let config: BlendyProductProverConfig<F, BenchStream<F>> =
                 BlendyProductProverConfig::<F, BenchStream<F>> {
-                    claim: multivariate_product_claim(vec![s.clone(), s.clone()]),
+                    claim: multivariate_product_claim(vec![s.clone(); bench_args.d]),
                     num_variables: bench_args.num_variables,
                     num_stages: bench_args.stage_size,
-                    streams: vec![s.clone(), s],
+                    streams: vec![s.clone(); bench_args.d],
                 };
-            let transcript = ProductSumcheck::<F>::prove::<
-                BenchStream<F>,
-                BlendyProductProver<F, BenchStream<F>>,
-            >(
-                &mut BlendyProductProver::<F, BenchStream<F>>::new(config),
-                &mut rng,
-            );
-            assert!(transcript.is_accepted);
+            match bench_args.d {
+                2 => {
+                    let transcript = ProductSumcheck::<F>::prove::<
+                        BenchStream<F>,
+                        BlendyProductProver<F, BenchStream<F>, 2>,
+                    >(
+                        &mut BlendyProductProver::<F, BenchStream<F>, 2>::new(config),
+                        &mut rng,
+                    );
+                    assert!(transcript.is_accepted);
+                }
+                3 => {
+                    let transcript = ProductSumcheck::<F>::prove::<
+                        BenchStream<F>,
+                        BlendyProductProver<F, BenchStream<F>, 3>,
+                    >(
+                        &mut BlendyProductProver::<F, BenchStream<F>, 3>::new(config),
+                        &mut rng,
+                    );
+                    assert!(transcript.is_accepted);
+                }
+                _ => panic!("Unsupported d value: {}", bench_args.d),
+            }
         }
         AlgorithmLabel::ProductCTY => {
             let config: SpaceProductProverConfig<F, BenchStream<F>> =
                 SpaceProductProverConfig::<F, BenchStream<F>> {
-                    claim: multivariate_product_claim(vec![s.clone(), s.clone()]),
+                    claim: multivariate_product_claim(vec![s.clone(); bench_args.d]),
                     num_variables: bench_args.num_variables,
-                    streams: vec![s.clone(), s],
+                    streams: vec![s.clone(); bench_args.d],
                 };
             let transcript = ProductSumcheck::<F>::prove::<
                 BenchStream<F>,
-                SpaceProductProver<F, BenchStream<F>>,
+                SpaceProductProver<F, BenchStream<F>, 3>,
             >(
-                &mut SpaceProductProver::<F, BenchStream<F>>::new(config),
+                &mut SpaceProductProver::<F, BenchStream<F>, 3>::new(config),
                 &mut rng,
             );
             assert!(transcript.is_accepted);
