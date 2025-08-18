@@ -95,6 +95,70 @@ impl<'a, F: Field, O: OrderStrategy> LagrangePolynomial<'a, F, O> {
         }
         acc
     }
+
+    // Interpolate/evaluate using one point at infinity and finite nodes.
+    // Inputs:
+    // - leading_coeff: s(∞), the coefficient of X^d where d = finite_nodes.len()
+    // - finite_nodes: [x_0, ..., x_d] (distinct)
+    // - finite_values: [s(x_0), ..., s(x_d)]
+    pub fn evaluate_from_infty_and_points(
+        verifier_message: F,
+        leading_coeff: F,
+        finite_nodes: &[F],
+        finite_values: &[F],
+    ) -> F {
+        assert!(finite_nodes.len() == finite_values.len());
+        let d = finite_nodes.len();
+        assert!(d >= 1, "Need at least one finite node when using ∞");
+
+        // leading term: a * Π (r - x_k)
+        let mut prod = F::ONE;
+        for x in finite_nodes.iter() {
+            prod *= verifier_message - *x;
+        }
+        let mut acc = leading_coeff * prod;
+
+        // + Σ s(x_k) * L_k(r) on the finite set
+        for i in 0..d {
+            let xi = finite_nodes[i];
+            let mut li = F::ONE;
+            for j in 0..d {
+                if i == j { continue; }
+                let xj = finite_nodes[j];
+                let denom = (xi - xj).inverse().expect("distinct nodes required");
+                li *= (verifier_message - xj) * denom;
+            }
+            acc += finite_values[i] * li;
+        }
+        acc
+    }
+
+    // Convenience wrapper for the standard node set {0,1,2,...} with ∞ and derived g(1).
+    // extras_at_2_plus contains values at nodes {2,3,...} in order.
+    pub fn evaluate_from_infty_and_standard_nodes(
+        verifier_message: F,
+        leading_coeff: F,
+        value_at_zero: F,
+        value_at_one: F,
+        extras_at_2_plus: &[F],
+    ) -> F {
+        let mut finite_nodes: Vec<F> = Vec::with_capacity(2 + extras_at_2_plus.len());
+        let mut finite_values: Vec<F> = Vec::with_capacity(2 + extras_at_2_plus.len());
+        finite_nodes.push(F::ZERO);
+        finite_values.push(value_at_zero);
+        finite_nodes.push(F::ONE);
+        finite_values.push(value_at_one);
+        for i in 0..extras_at_2_plus.len() {
+            finite_nodes.push(F::from((i as u32) + 2));
+            finite_values.push(extras_at_2_plus[i]);
+        }
+        Self::evaluate_from_infty_and_points(
+            verifier_message,
+            leading_coeff,
+            &finite_nodes,
+            &finite_values,
+        )
+    }
 }
 
 impl<'a, F: Field> Iterator for LagrangePolynomial<'a, F, GraycodeOrder> {

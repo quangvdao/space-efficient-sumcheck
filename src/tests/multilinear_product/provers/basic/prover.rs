@@ -19,7 +19,6 @@ impl<F: Field> Prover<F> for BasicProductProver<F> {
         Self {
             claim: prover_config.claim,
             current_round: 0,
-            inverse_four: F::from(4_u32).inverse().unwrap(),
             num_variables: prover_config.num_variables,
             p: prover_config.p,
             q: prover_config.q,
@@ -38,13 +37,13 @@ impl<F: Field> Prover<F> for BasicProductProver<F> {
                 .receive_message(verifier_message.unwrap());
         }
 
-        let sums: (F, F, F) = self.compute_round();
+        let (g0, leading) = self.compute_round_components();
 
         // Increment the round counter
         self.current_round += 1;
 
-        // Return the computed polynomial sums in node order [0, 1, 1/2]
-        Some(ark_std::vec![sums.0, sums.1, sums.2])
+        // Return the computed polynomial sums in node order [0, ∞]
+        Some(ark_std::vec![g0, leading])
     }
 }
 

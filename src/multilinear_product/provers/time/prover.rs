@@ -29,10 +29,6 @@ impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for TimeProductProver<F, 
             evaluations: std::array::from_fn(|_| None),
             streams: Some(streams_arr),
             num_variables,
-            inverse_two_pow_d: {
-                let two_pow_d: u64 = 1u64 << (D as u32);
-                F::from(two_pow_d).inverse().unwrap()
-            },
         }
     }
 
@@ -71,6 +67,6 @@ mod tests {
 
     #[test]
     fn parity_with_basic_prover() {
-        consistency_test::<F64, BenchStream<F64>, TimeProductProver<F64, BenchStream<F64>, 2>>();
+        consistency_test::<F64, BenchStream<F64>, TimeProductProver<F64, BenchStream<F64>, 2>, 2>();
     }
 }

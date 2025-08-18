@@ -56,14 +56,14 @@ impl<F: Field, S: Stream<F>, const D: usize> EvalToomProductProver<F, S, D> {
 		}
 	}
 
-	/// Stubbed round computation. For now, it returns zeros with length D+1,
-	/// matching the node set used by Blendy (0, 1, 1/2, 2, ..., D-1).
+	/// Stubbed round computation. For now, it returns zeros with length D,
+	/// matching the new node set [0, ∞, 2, ..., D-1] when D>1, and [0] when D=1.
 	pub fn compute_round(&mut self) -> Vec<F> {
 		if self.switched_to_vsbw {
 			return self.vsbw_prover.vsbw_evaluate();
 		}
-		let mut result = Vec::with_capacity(D + 1);
-		for _ in 0..(D + 1) {
+		let mut result = Vec::with_capacity(D);
+		for _ in 0..D {
 			result.push(F::ZERO);
 		}
 		result

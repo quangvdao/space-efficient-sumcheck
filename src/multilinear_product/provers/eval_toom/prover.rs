@@ -41,14 +41,12 @@ impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for EvalToomProductProver
 		assert!(state_comp_set.len() > 0);
 
 		let last_round: usize = *state_comp_set.iter().next_back().unwrap();
-		let two_pow_d: u64 = 1u64 << (D as u32);
 		let vsbw_prover = TimeProductProver::<F, S, D> {
 			claim: prover_config.claim,
 			current_round: 0,
 			evaluations: std::array::from_fn(|_| None),
 			streams: None,
 			num_variables: num_variables - last_round + 1,
-			inverse_two_pow_d: F::from(two_pow_d).inverse().unwrap(),
 		};
 
 		let streams_vec = prover_config.streams;

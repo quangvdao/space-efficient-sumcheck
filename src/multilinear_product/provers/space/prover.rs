@@ -35,8 +35,6 @@ impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for SpaceProductProver<F,
             verifier_messages: VerifierMessages::new(&vec![]),
             current_round: 0,
             num_variables: prover_config.num_variables,
-            inverse_four: F::from(4_u32).inverse().unwrap(),
-            inverse_two_pow_d: F::from(1u64 << (D as u32)).inverse().unwrap(),
         }
     }
 

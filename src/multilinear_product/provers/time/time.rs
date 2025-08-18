@@ -9,7 +9,6 @@ pub struct TimeProductProver<F: Field, S: Stream<F>, const D: usize> {
     pub evaluations: [Option<Vec<F>>; D],
     pub streams: Option<[S; D]>,
     pub num_variables: usize,
-    pub inverse_two_pow_d: F,
 }
 
 impl<'a, F: Field, S: Stream<F>, const D: usize> TimeProductProver<F, S, D> {
@@ -24,13 +23,9 @@ impl<'a, F: Field, S: Stream<F>, const D: usize> TimeProductProver<F, S, D> {
      * from the streams (instead of the tables), which reduces max memory usage by 1/2
      */
     pub fn vsbw_evaluate(&self) -> Vec<F> {
-        // Node set: [0, 1, 1/2, 2, 3, ..., D-1]
-        let mut nodes: Vec<F> = Vec::with_capacity(D + 1);
-        nodes.push(F::ZERO);
-        nodes.push(F::ONE);
-        nodes.push(F::from(2_u32).inverse().unwrap());
-        for k in 2..D { nodes.push(F::from(k as u32)); }
-        let mut sums: Vec<F> = vec![F::ZERO; nodes.len()];
+        // Message shape: [0, ∞, 2, 3, ..., D-1]
+        let num_extras = if D > 2 { D - 2 } else { 0 };
+        let mut sums: Vec<F> = vec![F::ZERO; 2 + num_extras];
 
         // Calculate the bitmask for the number of free variables
         let bitmask: usize = 1 << (self.num_free_variables() - 1);
@@ -46,7 +41,9 @@ impl<'a, F: Field, S: Stream<F>, const D: usize> TimeProductProver<F, S, D> {
 
         // Iterate through evaluations
         for i in 0..(evaluations_len / 2) {
-            let mut prod_for_node: Vec<F> = vec![F::ONE; nodes.len()];
+            let mut prod_g0: F = F::ONE;
+            let mut prod_leading: F = F::ONE;
+            let mut prod_extras: Vec<F> = vec![F::ONE; num_extras];
 
             for j in 0..D {
                 let v0 = match &self.evaluations[j] {
@@ -63,22 +60,25 @@ impl<'a, F: Field, S: Stream<F>, const D: usize> TimeProductProver<F, S, D> {
                     },
                     Some(evals) => evals[i | bitmask],
                 };
-                // 0 and 1
-                prod_for_node[0] *= v0;
-                prod_for_node[1] *= v1;
-                // 1/2
-                prod_for_node[2] *= v0 + v1;
-                // extra nodes
-                for (idx, z) in nodes.iter().enumerate().skip(3) {
-                    let val = (F::ONE - *z) * v0 + *z * v1;
-                    prod_for_node[idx] *= val;
+                // node 0 and ∞
+                let diff = v1 - v0;
+                prod_g0 *= v0;
+                prod_leading *= diff;
+                let v1 = v0 + diff;
+                // extra nodes z = 2..D-1 evaluated iteratively: val(z) = v1 + (z-1)*diff
+                if num_extras > 0 {
+                    let mut val = v1 + diff;
+                    prod_extras[0] *= val;
+                    for k in 1..num_extras {
+                        val += diff;
+                        prod_extras[k] *= val;
+                    }
                 }
             }
-            for idx in 0..nodes.len() { sums[idx] += prod_for_node[idx]; }
+            sums[0] += prod_g0;
+            sums[1] += prod_leading;
+            for k in 0..num_extras { sums[2 + k] += prod_extras[k]; }
         }
-
-        // scale 1/2 node
-        if nodes.len() > 2 { sums[2] = sums[2] * self.inverse_two_pow_d; }
 
         sums
     }

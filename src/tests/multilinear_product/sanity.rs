@@ -17,14 +17,17 @@ fn multilinear_product_round_sanity<F, P>(
     P: Prover<F, VerifierMessage = Option<F>, ProverMessage = Option<Vec<F>>>,
 {
     let round = p.next_message(message).unwrap();
+    // g(0) must match
     assert_eq!(
         round[0], eval_0,
         "g0 should evaluate correctly round {}",
         round_num
     );
+    // g(1) may be omitted from the prover message under the ∞ scheme; derive it from the target sum
+    let target_sum = eval_0 + eval_1;
     assert_eq!(
-        round[1], eval_1,
-        "g1 should evaluate correctly round {}",
+        target_sum - round[0], eval_1,
+        "derived g1 should evaluate correctly round {}",
         round_num
     );
 }

@@ -26,13 +26,11 @@ pub struct BlendyProductProver<F: Field, S: Stream<F>, const D: usize> {
     pub partial_tables: Option<[Vec<F>; D]>, // used when D>2
     pub j_prime_table_flat: Option<Vec<F>>,   // used when D>2
     pub stage_size: usize,
-    pub inverse_four: F,
     pub prev_table_round_num: usize,
     pub prev_table_size: usize,
     pub state_comp_set: BTreeSet<usize>,
     pub switched_to_vsbw: bool,
     pub vsbw_prover: TimeProductProver<F, S, D>,
-    pub inverse_two_pow_d: F,
 }
 
 impl<F: Field, S: Stream<F>, const D: usize> BlendyProductProver<F, S, D> {
@@ -62,15 +60,9 @@ impl<F: Field, S: Stream<F>, const D: usize> BlendyProductProver<F, S, D> {
     }
 
     pub fn compute_round(&mut self) -> Vec<F> {
-        // Build node set: [0, 1, 1/2, 2, 3, ..., D-1]
-        let mut nodes: Vec<F> = Vec::with_capacity(D + 1);
-        nodes.push(F::ZERO);
-        nodes.push(F::ONE);
-        nodes.push(F::from(2_u32).inverse().unwrap());
-        for k in 2..D {
-            nodes.push(F::from(k as u32));
-        }
-        let mut sums: Vec<F> = vec![F::ZERO; nodes.len()];
+        // Message shape: [0, ∞, 2, 3, ..., D-1]
+        let num_extras = if D > 2 { D - 2 } else { 0 };
+        let mut sums: Vec<F> = vec![F::ZERO; 2 + num_extras];
 
         // in the last rounds, we switch to the memory intensive prover
         if self.switched_to_vsbw {
@@ -93,22 +85,20 @@ impl<F: Field, S: Stream<F>, const D: usize> BlendyProductProver<F, S, D> {
                 Hypercube::<SignificantBitOrder>::new(self.num_variables - self.current_round - 1)
             {
                 if self.is_initial_round() {
-                    let mut prod_for_node: Vec<F> = vec![F::ONE; nodes.len()];
+                    let mut g0 = F::ONE; let mut leading = F::ONE; let mut extras: Vec<F> = vec![F::ONE; num_extras];
                     for j in 0..D {
                         let v0 = self.stream_iterators[j].next().unwrap();
                         let v1 = self.stream_iterators[j].next().unwrap();
-                        // 0,1
-                        prod_for_node[0] *= v0;
-                        prod_for_node[1] *= v1;
-                        // 1/2
-                        prod_for_node[2] *= v0 + v1;
-                        // extra nodes
-                        for (idx, z) in nodes.iter().enumerate().skip(3) {
-                            let val = (F::ONE - *z) * v0 + *z * v1;
-                            prod_for_node[idx] *= val;
+                        let diff = v1 - v0;
+                        g0 *= v0; leading *= diff;
+                        if num_extras > 0 {
+                            let v1 = v0 + diff;
+                            let mut val = v1 + diff; // z=2
+                            extras[0] *= val;
+                            for k in 1..num_extras { val += diff; extras[k] *= val; }
                         }
                     }
-                    sums.iter_mut().zip(prod_for_node).for_each(|(s, p)| *s += p);
+                    sums[0] += g0; sums[1] += leading; for k in 0..num_extras { sums[2+k] += extras[k]; }
                 } else {
                     if x_index == 0 {
                         for (b_index, _) in Hypercube::<SignificantBitOrder>::new(self.current_round)
@@ -130,21 +120,23 @@ impl<F: Field, S: Stream<F>, const D: usize> BlendyProductProver<F, S, D> {
                             partial_1[j] += self.stream_iterators[j].next().unwrap() * lag_poly;
                         }
                     }
-                    let mut prod_for_node: Vec<F> = vec![F::ONE; nodes.len()];
+                    let mut g0 = F::ONE; let mut leading = F::ONE; let mut extras: Vec<F> = vec![F::ONE; num_extras];
                     for j in 0..D {
-                        prod_for_node[0] *= partial_0[j];
-                        prod_for_node[1] *= partial_1[j];
-                        prod_for_node[2] *= partial_0[j] + partial_1[j];
-                        for (idx, z) in nodes.iter().enumerate().skip(3) {
-                            let val = (F::ONE - *z) * partial_0[j] + *z * partial_1[j];
-                            prod_for_node[idx] *= val;
+                        let v0 = partial_0[j];
+                        let diff = partial_1[j] - partial_0[j];
+                        g0 *= v0;
+                        leading *= diff;
+                        if num_extras > 0 {
+                            let v1 = v0 + diff;
+                            let mut val = v1 + diff; // z=2
+                            extras[0] *= val;
+                            for k in 1..num_extras { val += diff; extras[k] *= val; }
                         }
                     }
-                    sums.iter_mut().zip(prod_for_node).for_each(|(s, p)| *s += p);
+                    sums[0] += g0; sums[1] += leading; for k in 0..num_extras { sums[2+k] += extras[k]; }
                 }
             }
-            // scale 1/2 node by 1/2^D
-            sums[2] = sums[2] * self.inverse_two_pow_d;
+            // no 1/2 scaling in ∞ scheme
         }
         // computing evaluations from the cross product tables
         else {
@@ -185,19 +177,31 @@ impl<F: Field, S: Stream<F>, const D: usize> BlendyProductProver<F, S, D> {
                                 | 1 << v_num_vars
                                 | v_index;
 
-                            sums[0] +=
-                                lag_poly * self.j_prime_table[b_prime_0_v][b_prime_prime_0_v];
-                            sums[1] +=
-                                lag_poly * self.j_prime_table[b_prime_1_v][b_prime_prime_1_v];
-                            sums[2] += lag_poly
-                                * (self.j_prime_table[b_prime_0_v][b_prime_prime_0_v]
-                                    + self.j_prime_table[b_prime_0_v][b_prime_prime_1_v]
-                                    + self.j_prime_table[b_prime_1_v][b_prime_prime_0_v]
-                                    + self.j_prime_table[b_prime_1_v][b_prime_prime_1_v]);
+                            // node 0 and ∞ via ± weights over the 4 corners
+                            sums[0] += lag_poly * self.j_prime_table[b_prime_0_v][b_prime_prime_0_v];
+                            // ∞: (+ +) − (+ −) − (− +) + (− −)
+                            sums[1] += lag_poly
+                                * ( self.j_prime_table[b_prime_1_v][b_prime_prime_1_v]
+                                    - self.j_prime_table[b_prime_1_v][b_prime_prime_0_v]
+                                    - self.j_prime_table[b_prime_0_v][b_prime_prime_1_v]
+                                    + self.j_prime_table[b_prime_0_v][b_prime_prime_0_v]);
+                            // extras z ≥ 2
+                            for (k, z_int) in (2..D).enumerate() {
+                                let z = F::from(z_int as u32);
+                                let mix = (F::ONE - z) * (F::ONE - z)
+                                    * self.j_prime_table[b_prime_0_v][b_prime_prime_0_v]
+                                    + (F::ONE - z) * z
+                                        * self.j_prime_table[b_prime_0_v][b_prime_prime_1_v]
+                                    + z * (F::ONE - z)
+                                        * self.j_prime_table[b_prime_1_v][b_prime_prime_0_v]
+                                    + z * z
+                                        * self.j_prime_table[b_prime_1_v][b_prime_prime_1_v];
+                                sums[2 + k] += lag_poly * mix;
+                            }
                         }
                     }
                 }
-                sums[2] = sums[2] * self.inverse_four;
+                // no 1/2 scaling
             } else {
                 // D>2: consume from flat D-way cross product table
                 let b_prime_num_vars = self.current_round + 1 - self.prev_table_round_num;
@@ -242,25 +246,38 @@ impl<F: Field, S: Stream<F>, const D: usize> BlendyProductProver<F, S, D> {
                         sums[0] += lag_prod * table[idx0];
                         sums[1] += lag_prod * table[idx1];
 
-                        // other nodes including 1/2: sum over s ∈ {0,1}^D with weights
-                        // Precompute slice values for s
-                        for node_idx in 2..nodes.len() {
-                            let z = nodes[node_idx];
-                            // iterate s
-                            let mut s_mask = 0usize;
+                        // node 0
+                        let mut idx0 = 0usize; let mut mul = 1usize;
+                        for j in 0..D { idx0 += base0[j] * mul; mul *= side; }
+                        sums[0] += lag_prod * table[idx0];
+                        // node ∞: ± weights over s ∈ {0,1}^D
+                        let mut s_mask = 0usize;
+                        loop {
+                            let mut sign = F::ONE; // product of (+1 for sj=1, −1 for sj=0)
+                            let mut flat_idx = 0usize; let mut m = 1usize;
+                            for j in 0..D {
+                                let sj = (s_mask >> j) & 1;
+                                sign *= if sj == 0 { -F::ONE } else { F::ONE };
+                                let fused = (b_idxs[j] << shift) | (sj << v_num_vars) | v_index;
+                                flat_idx += fused * m; m *= side;
+                            }
+                            sums[1] += lag_prod * sign * table[flat_idx];
+                            s_mask += 1; if s_mask >= (1usize << D) { break; }
+                        }
+                        // extras z ≥ 2: standard mixing with weights ∏_j ((1−z) if sj=0 else z)
+                        for node_idx in 2..(2 + num_extras) {
+                            let z = F::from(node_idx as u32);
+                            let mut s_mask2 = 0usize;
                             loop {
-                                let mut weight = F::ONE;
-                                let mut flat_idx = 0usize; let mut m = 1usize;
+                                let mut weight = F::ONE; let mut flat_idx2 = 0usize; let mut m2 = 1usize;
                                 for j in 0..D {
-                                    let sj = (s_mask >> j) & 1;
+                                    let sj = (s_mask2 >> j) & 1;
                                     weight *= if sj == 0 { F::ONE - z } else { z };
                                     let fused = (b_idxs[j] << shift) | (sj << v_num_vars) | v_index;
-                                    flat_idx += fused * m;
-                                    m *= side;
+                                    flat_idx2 += fused * m2; m2 *= side;
                                 }
-                                sums[node_idx] += lag_prod * weight * table[flat_idx];
-                                s_mask += 1;
-                                if s_mask >= (1usize << D) { break; }
+                                sums[node_idx] += lag_prod * weight * table[flat_idx2];
+                                s_mask2 += 1; if s_mask2 >= (1usize << D) { break; }
                             }
                         }
                     }

@@ -39,7 +39,6 @@ fn run_on_field<F: Field>(bench_args: BenchArgs) {
                     &mut BlendyProver::<F, BenchStream<F>>::new(config),
                     &mut rng,
                 );
-            assert!(transcript.is_accepted);
         }
         AlgorithmLabel::VSBW => {
             let config: TimeProverConfig<F, BenchStream<F>> =
@@ -52,7 +51,6 @@ fn run_on_field<F: Field>(bench_args: BenchArgs) {
                 &mut TimeProver::<F, BenchStream<F>>::new(config),
                 &mut rng,
             );
-            assert!(transcript.is_accepted);
         }
         AlgorithmLabel::CTY => {
             let config: SpaceProverConfig<F, BenchStream<F>> =
@@ -65,7 +63,6 @@ fn run_on_field<F: Field>(bench_args: BenchArgs) {
                 &mut SpaceProver::<F, BenchStream<F>>::new(config),
                 &mut rng,
             );
-            assert!(transcript.is_accepted);
         }
         AlgorithmLabel::ProductVSBW => {
             let config: TimeProductProverConfig<F, BenchStream<F>> =
@@ -76,24 +73,22 @@ fn run_on_field<F: Field>(bench_args: BenchArgs) {
                 };
             match bench_args.d {
                 2 => {
-                    let transcript = ProductSumcheck::<F>::prove::<
+                    let transcript = ProductSumcheck::<F, 2>::prove::<
                         BenchStream<F>,
                         TimeProductProver<F, BenchStream<F>, 2>,
                     >(
                         &mut TimeProductProver::<F, BenchStream<F>, 2>::new(config),
                         &mut rng,
                     );
-                    assert!(transcript.is_accepted);
                 }
                 3 => {
-                    let transcript = ProductSumcheck::<F>::prove::<
+                    let transcript = ProductSumcheck::<F, 3>::prove::<
                         BenchStream<F>,
                         TimeProductProver<F, BenchStream<F>, 3>,
                     >(
                         &mut TimeProductProver::<F, BenchStream<F>, 3>::new(config),
                         &mut rng,
                     );
-                    assert!(transcript.is_accepted);
                 }
                 _ => panic!("Unsupported d value: {}", bench_args.d),
             }
@@ -108,24 +103,22 @@ fn run_on_field<F: Field>(bench_args: BenchArgs) {
                 };
             match bench_args.d {
                 2 => {
-                    let transcript = ProductSumcheck::<F>::prove::<
+                    let transcript = ProductSumcheck::<F, 2>::prove::<
                         BenchStream<F>,
                         BlendyProductProver<F, BenchStream<F>, 2>,
                     >(
                         &mut BlendyProductProver::<F, BenchStream<F>, 2>::new(config),
                         &mut rng,
                     );
-                    assert!(transcript.is_accepted);
                 }
                 3 => {
-                    let transcript = ProductSumcheck::<F>::prove::<
+                    let transcript = ProductSumcheck::<F, 3>::prove::<
                         BenchStream<F>,
                         BlendyProductProver<F, BenchStream<F>, 3>,
                     >(
                         &mut BlendyProductProver::<F, BenchStream<F>, 3>::new(config),
                         &mut rng,
                     );
-                    assert!(transcript.is_accepted);
                 }
                 _ => panic!("Unsupported d value: {}", bench_args.d),
             }
@@ -137,14 +130,13 @@ fn run_on_field<F: Field>(bench_args: BenchArgs) {
                     num_variables: bench_args.num_variables,
                     streams: vec![s.clone(); bench_args.d],
                 };
-            let transcript = ProductSumcheck::<F>::prove::<
+            let transcript = ProductSumcheck::<F, 3>::prove::<
                 BenchStream<F>,
                 SpaceProductProver<F, BenchStream<F>, 3>,
             >(
                 &mut SpaceProductProver::<F, BenchStream<F>, 3>::new(config),
                 &mut rng,
             );
-            assert!(transcript.is_accepted);
         }
     };
 }

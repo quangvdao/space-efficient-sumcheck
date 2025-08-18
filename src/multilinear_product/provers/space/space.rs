@@ -14,18 +14,12 @@ pub struct SpaceProductProver<F: Field, S: Stream<F>, const D: usize> {
 	pub stream_iterators: [StreamIterator<F, S, SignificantBitOrder>; D],
 	pub num_variables: usize,
 	pub verifier_messages: VerifierMessages<F>,
-	pub inverse_four: F,
-	pub inverse_two_pow_d: F,
 }
 
 impl<F: Field, S: Stream<F>, const D: usize> SpaceProductProver<F, S, D> {
 	pub fn cty_evaluate(&mut self) -> Vec<F> {
-		let mut nodes: Vec<F> = Vec::with_capacity(D + 1);
-		nodes.push(F::ZERO);
-		nodes.push(F::ONE);
-		nodes.push(F::from(2_u32).inverse().unwrap());
-		for k in 2..D { nodes.push(F::from(k as u32)); }
-		let mut sums: Vec<F> = vec![F::ZERO; nodes.len()];
+		let num_extras = if D > 2 { D - 2 } else { 0 };
+		let mut sums: Vec<F> = vec![F::ZERO; 2 + num_extras];
 
 		// reset the streams
 		self.stream_iterators.iter_mut().for_each(|it| it.reset());
@@ -33,19 +27,23 @@ impl<F: Field, S: Stream<F>, const D: usize> SpaceProductProver<F, S, D> {
 		for (_, _) in Hypercube::<SignificantBitOrder>::new(self.num_variables - self.current_round - 1) {
 			// can avoid unnecessary additions for first round since there is no lag poly: gives a small speedup
 			if self.current_round == 0 {
-				let mut prod_for_node: Vec<F> = vec![F::ONE; nodes.len()];
+				let mut g0 = F::ONE;
+				let mut leading = F::ONE;
+				let mut extras: Vec<F> = vec![F::ONE; num_extras];
 				for j in 0..D {
 					let v0 = self.stream_iterators[j].next().unwrap();
 					let v1 = self.stream_iterators[j].next().unwrap();
-					prod_for_node[0] *= v0;
-					prod_for_node[1] *= v1;
-					prod_for_node[2] *= v0 + v1;
-					for (idx, z) in nodes.iter().enumerate().skip(3) {
-						let val = (F::ONE - *z) * v0 + *z * v1;
-						prod_for_node[idx] *= val;
+					let diff = v1 - v0;
+					g0 *= v0;
+					leading *= diff;
+					if num_extras > 0 {
+						let v1 = v0 + diff;
+						let mut val = v1 + diff; // z=2
+						extras[0] *= val;
+						for k in 1..num_extras { val += diff; extras[k] *= val; }
 					}
 				}
-				for idx in 0..nodes.len() { sums[idx] += prod_for_node[idx]; }
+				sums[0] += g0; sums[1] += leading; for k in 0..num_extras { sums[2+k] += extras[k]; }
 			} else {
 				let mut partial_0: [F; D] = [F::ZERO; D];
 				let mut lag0: LagrangePolynomial<F, SignificantBitOrder> = LagrangePolynomial::new(&self.verifier_messages);
@@ -65,21 +63,22 @@ impl<F: Field, S: Stream<F>, const D: usize> SpaceProductProver<F, S, D> {
 					}
 				}
 
-				let mut prod_for_node: Vec<F> = vec![F::ONE; nodes.len()];
+				let mut g0 = F::ONE; let mut leading = F::ONE; let mut extras: Vec<F> = vec![F::ONE; num_extras];
 				for j in 0..D {
-					prod_for_node[0] *= partial_0[j];
-					prod_for_node[1] *= partial_1[j];
-					prod_for_node[2] *= partial_0[j] + partial_1[j];
-					for (idx, z) in nodes.iter().enumerate().skip(3) {
-						let val = (F::ONE - *z) * partial_0[j] + *z * partial_1[j];
-						prod_for_node[idx] *= val;
+					let v0 = partial_0[j];
+					let diff = partial_1[j] - partial_0[j];
+					g0 *= v0;
+					leading *= diff;
+					if num_extras > 0 {
+						let v1 = v0 + diff;
+						let mut val = v1 + diff; // z=2
+						extras[0] *= val;
+						for k in 1..num_extras { val += diff; extras[k] *= val; }
 					}
 				}
-				for idx in 0..nodes.len() { sums[idx] += prod_for_node[idx]; }
+				sums[0] += g0; sums[1] += leading; for k in 0..num_extras { sums[2+k] += extras[k]; }
 			}
 		}
-		// scale 1/2 node
-		if nodes.len() > 2 { sums[2] = sums[2] * self.inverse_two_pow_d; }
 		sums
 	}
 }
