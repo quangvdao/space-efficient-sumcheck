@@ -34,10 +34,7 @@ impl<F: Field, S: Stream<F>> Prover<F> for TimeProver<F, S> {
         // If it's not the first round, reduce the evaluations table
         if self.current_round != 0 {
             // update the evaluations table by absorbing leftmost variable assigned to verifier_message
-            self.vsbw_reduce_evaluations(
-                verifier_message.unwrap(),
-                F::ONE - verifier_message.unwrap(),
-            )
+            self.vsbw_reduce_evaluations(verifier_message.unwrap())
         }
 
         // evaluate using vsbw

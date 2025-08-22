@@ -3,7 +3,7 @@ use ark_std::vec::Vec;
 
 use crate::streams::Stream;
 
-pub struct TimeProductProver<F: Field, S: Stream<F>, const D: usize> {
+pub struct ImprovedTimeProductProver<F: Field, S: Stream<F>, const D: usize> {
     pub claim: F,
     pub current_round: usize,
     pub evaluations: [Option<Vec<F>>; D],
@@ -11,7 +11,7 @@ pub struct TimeProductProver<F: Field, S: Stream<F>, const D: usize> {
     pub num_variables: usize,
 }
 
-impl<'a, F: Field, S: Stream<F>, const D: usize> TimeProductProver<F, S, D> {
+impl<'a, F: Field, S: Stream<F>, const D: usize> ImprovedTimeProductProver<F, S, D> {
     pub fn total_rounds(&self) -> usize {
         self.num_variables
     }
@@ -22,7 +22,7 @@ impl<'a, F: Field, S: Stream<F>, const D: usize> TimeProductProver<F, S, D> {
      * Note in evaluate() there's an optimization for the first round where we read directly
      * from the streams (instead of the tables), which reduces max memory usage by 1/2
      */
-    pub fn vsbw_evaluate(&self) -> Vec<F> {
+    pub fn toom_evaluate(&self) -> Vec<F> {
         // Message shape: [0, ∞, 2, 3, ..., D-1]
         let num_extras = if D > 2 { D - 2 } else { 0 };
         let mut sums: Vec<F> = vec![F::ZERO; 2 + num_extras];
@@ -82,7 +82,7 @@ impl<'a, F: Field, S: Stream<F>, const D: usize> TimeProductProver<F, S, D> {
 
         sums
     }
-    pub fn vsbw_reduce_evaluations(&mut self, verifier_message: F) {
+    pub fn reduce_evaluations(&mut self, verifier_message: F) {
         for i in 0..D {
             // Clone or initialize the evaluations vector
             let mut evaluations = match &self.evaluations[i] {

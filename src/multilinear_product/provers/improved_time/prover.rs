@@ -1,13 +1,13 @@
 use ark_ff::Field;
 
 use crate::{
-    multilinear_product::{TimeProductProver, TimeProductProverConfig},
+    multilinear_product::{ImprovedTimeProductProver, ImprovedTimeProductProverConfig},
     prover::Prover,
     streams::Stream,
 };
 
-impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for TimeProductProver<F, S, D> {
-    type ProverConfig = TimeProductProverConfig<F, S>;
+impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for ImprovedTimeProductProver<F, S, D> {
+    type ProverConfig = ImprovedTimeProductProverConfig<F, S>;
     type ProverMessage = Option<Vec<F>>;
     type VerifierMessage = Option<F>;
 
@@ -41,11 +41,11 @@ impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for TimeProductProver<F, 
         // If it's not the first round, reduce the evaluations table
         if self.current_round != 0 {
             // update the evaluations table by absorbing leftmost variable assigned to verifier_message
-            self.vsbw_reduce_evaluations(verifier_message.unwrap());
+            self.reduce_evaluations(verifier_message.unwrap());
         }
 
-        // evaluate using vsbw
-        let sums = self.vsbw_evaluate();
+        // evaluate using recursive toom-cook-based product
+        let sums = self.toom_evaluate();
 
         // Increment the round counter
         self.current_round += 1;
@@ -57,13 +57,12 @@ impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for TimeProductProver<F, 
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        multilinear_product::TimeProductProver,
-        tests::{multilinear_product::consistency_test, BenchStream, F64},
-    };
+    use crate::tests::{multilinear_product::consistency_test, BenchStream, F64};
+
+    use super::ImprovedTimeProductProver;
 
     #[test]
     fn parity_with_basic_prover() {
-        consistency_test::<F64, BenchStream<F64>, TimeProductProver<F64, BenchStream<F64>, 2>, 2>();
+        consistency_test::<F64, BenchStream<F64>, ImprovedTimeProductProver<F64, BenchStream<F64>, 2>, 2>();
     }
 }

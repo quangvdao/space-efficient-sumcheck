@@ -454,7 +454,7 @@ impl<F: Field, S: Stream<F>, const D: usize> BlendyProductProver<F, S, D> {
         } else if self.switched_to_vsbw {
             let verifier_message = self.verifier_messages.messages[self.current_round - 1];
             self.vsbw_prover
-                .vsbw_reduce_evaluations(verifier_message, F::ONE - verifier_message);
+                .vsbw_reduce_evaluations(verifier_message);
         }
     }
 }

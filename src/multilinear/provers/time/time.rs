@@ -50,7 +50,7 @@ impl<F: Field, S: Stream<F>> TimeProver<F, S> {
         // Return the accumulated sums
         (sum_0, sum_1)
     }
-    pub fn vsbw_reduce_evaluations(&mut self, verifier_message: F, verifier_message_hat: F) {
+    pub fn vsbw_reduce_evaluations(&mut self, verifier_message: F) {
         // Clone or initialize the evaluations vector
         let mut evaluations = match &self.evaluations {
             Some(evaluations) => evaluations.clone(),
@@ -83,9 +83,9 @@ impl<F: Field, S: Stream<F>> TimeProver<F, S> {
                 Some(evaluations) => evaluations[i1],
             };
 
-            // Update the i0-th evaluation based on the reduction operation
-            evaluations[i0] =
-                point_evaluation_i0 * verifier_message_hat + point_evaluation_i1 * verifier_message;
+            // Smarter reduction: e0 + r * (e1 - e0)
+            let diff = point_evaluation_i1 - point_evaluation_i0;
+            evaluations[i0] = point_evaluation_i0 + diff * verifier_message;
         }
 
         // Truncate the evaluations vector to the correct length
