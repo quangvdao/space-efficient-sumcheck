@@ -22,32 +22,59 @@ impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for BlendyProductProver<F
         let num_variables: usize = prover_config.num_variables;
         let num_stages: usize = prover_config.num_stages;
         let stage_size: usize = num_variables / num_stages;
-        let max_rounds_phase2: usize = num_variables.div_ceil(2 * num_stages);
 
-        let last_round_phase1: usize = 2;
-        let last_round_phase3: usize = num_variables - num_variables.div_ceil(num_stages);
+        // Paper-aligned parameters
+        // ell := floor(n / (d * k)) with d = D and k = num_stages
+        let ell: usize = core::cmp::max(1, num_variables / (D * num_stages));
+        let time_phase_end: usize = (D.saturating_sub(1)).saturating_mul(ell); // (d-1)*ell
+        // Tail switch window: final ell/k rounds (at least 1)
+        let tail_rounds: usize = core::cmp::max(1, ell / core::cmp::max(1, num_stages));
+        let last_round_phase3: usize = num_variables.saturating_sub(tail_rounds);
+        // Early rounds without passes: start immediately (j'=1), so no special phase1 for D>=2.
+        // For D==1 we avoid passes entirely and stream/linear-time only.
+        let last_round_phase1: usize = if D == 1 { num_variables } else { 0 };
 
         let state_comp_set: BTreeSet<usize> = {
-            let mut current_round: usize = last_round_phase1 + 1;
-            let mut state_comp_set: BTreeSet<usize> = BTreeSet::new();
-            while current_round <= last_round_phase3 {
-                state_comp_set.insert(current_round);
-                current_round =
-                    std::cmp::min(current_round + max_rounds_phase2, current_round * 2 - 1); // the minus one is a time-efficiency optimization
-                current_round = std::cmp::max(current_round, 2);
+            let mut set: BTreeSet<usize> = BTreeSet::new();
+            if D >= 2 {
+                // Time-constrained phase: j' = ceil(eta^t) where eta = d/(d-1)
+                // Generate by recurrence: j_{t+1} = ceil(eta * j_t) with j_0 = 1
+                // ceil(a/b * x) = (a*x + b - 1)/b
+                let num: usize = D; // numerator of eta
+                let den: usize = D - 1; // denominator of eta
+                let mut j_start: usize = 1;
+                while j_start <= time_phase_end && j_start <= last_round_phase3 {
+                    set.insert(j_start);
+                    let next = (num.saturating_mul(j_start) + (den - 1)) / den;
+                    if next <= j_start { break; }
+                    j_start = next;
+                }
+                // Space-constrained phase: passes every ell rounds when j >= (d-1)*ell
+                if ell > 0 {
+                    let m = if time_phase_end == 0 { 1 } else { (time_phase_end + ell - 1) / ell };
+                    let mut j_space = m.saturating_mul(ell);
+                    if j_space == 0 { j_space = ell; }
+                    while j_space <= last_round_phase3 {
+                        set.insert(j_space);
+                        let (next, overflow) = j_space.overflowing_add(ell);
+                        if overflow { break; }
+                        j_space = next;
+                    }
+                }
+                // Ensure we have at least one stage start
+                if set.is_empty() { set.insert(1); }
             }
-            // println!("state_comp_set: {:?}", state_comp_set);
-            state_comp_set
+            set
         };
-        assert!(state_comp_set.len() > 0);
+        if D >= 2 { assert!(state_comp_set.len() > 0); }
 
-        let last_round: usize = *state_comp_set.iter().next_back().unwrap();
+        let last_round: usize = state_comp_set.iter().next_back().copied().unwrap_or(num_variables + 1);
         let vsbw_prover = TimeProductProver::<F, S, D> {
             claim: prover_config.claim,
             current_round: 0,
             evaluations: std::array::from_fn(|_| None),
             streams: None,
-            num_variables: num_variables - last_round + 1,
+            num_variables: if last_round <= num_variables { num_variables - last_round + 1 } else { 0 },
         };
 
         let streams_vec = prover_config.streams;

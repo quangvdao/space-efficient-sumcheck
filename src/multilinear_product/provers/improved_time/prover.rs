@@ -1,4 +1,4 @@
-use ark_ff::Field;
+use crate::interpolation::field_mul_small::FieldMulSmall;
 
 use crate::{
     multilinear_product::{ImprovedTimeProductProver, ImprovedTimeProductProverConfig},
@@ -6,7 +6,7 @@ use crate::{
     streams::Stream,
 };
 
-impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for ImprovedTimeProductProver<F, S, D> {
+impl<F: FieldMulSmall, S: Stream<F>, const D: usize> Prover<F> for ImprovedTimeProductProver<F, S, D> {
     type ProverConfig = ImprovedTimeProductProverConfig<F, S>;
     type ProverMessage = Option<Vec<F>>;
     type VerifierMessage = Option<F>;
@@ -57,12 +57,12 @@ impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for ImprovedTimeProductPr
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::{multilinear_product::consistency_test, BenchStream, F64};
+    use crate::tests::{multilinear_product::consistency_test, BenchStream, FBN254};
 
     use super::ImprovedTimeProductProver;
 
     #[test]
     fn parity_with_basic_prover() {
-        consistency_test::<F64, BenchStream<F64>, ImprovedTimeProductProver<F64, BenchStream<F64>, 2>, 2>();
+        consistency_test::<FBN254, BenchStream<FBN254>, ImprovedTimeProductProver<FBN254, BenchStream<FBN254>, 2>, 2>();
     }
 }

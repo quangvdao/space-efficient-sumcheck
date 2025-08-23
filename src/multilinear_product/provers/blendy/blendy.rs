@@ -60,7 +60,77 @@ impl<F: Field, S: Stream<F>, const D: usize> BlendyProductProver<F, S, D> {
     }
 
     pub fn compute_round(&mut self) -> Vec<F> {
-        // Message shape: [0, ∞, 2, 3, ..., D-1]
+        // Message shape: D==1 -> [0]; D>=2 -> [0, ∞, 2, 3, ..., D-1]
+        if D == 1 {
+            let mut sums: Vec<F> = vec![F::ZERO; 1];
+            // switched to linear-time (vsbw) tail: accumulate only g(0)
+            if self.switched_to_vsbw {
+                // Calculate the bitmask for the number of free variables
+                let bitmask: usize = 1 << (self.vsbw_prover.num_free_variables() - 1);
+                // Determine the length of evaluations to iterate through
+                let evaluations_len = match &self.vsbw_prover.evaluations[0] {
+                    Some(evaluations) => evaluations.len(),
+                    None => match &self.vsbw_prover.streams {
+                        Some(streams) => 2usize.pow(streams[0].num_variables() as u32),
+                        None => panic!("Both streams and evaluations cannot be None"),
+                    },
+                };
+                for i in 0..(evaluations_len / 2) {
+                    let v0 = match &self.vsbw_prover.evaluations[0] {
+                        None => match &self.vsbw_prover.streams {
+                            Some(streams) => streams[0].evaluation(i),
+                            None => panic!("Both streams and evaluations cannot be None"),
+                        },
+                        Some(evals) => evals[i],
+                    };
+                    let _v1 = match &self.vsbw_prover.evaluations[0] {
+                        None => match &self.vsbw_prover.streams {
+                            Some(streams) => streams[0].evaluation(i | bitmask),
+                            None => panic!("Both streams and evaluations cannot be None"),
+                        },
+                        Some(evals) => evals[i | bitmask],
+                    };
+                    sums[0] += v0;
+                }
+                return sums;
+            }
+            // streaming rounds (no tables) and general rounds for D==1: compute via lagrange over prefix
+            // reset the streams
+            self.stream_iterators.iter_mut().for_each(|stream_it| stream_it.reset());
+            if self.is_initial_round() {
+                for (_x_index, _) in Hypercube::<SignificantBitOrder>::new(self.num_variables - self.current_round - 1) {
+                    let v0 = self.stream_iterators[0].next().unwrap();
+                    let _v1 = self.stream_iterators[0].next().unwrap();
+                    sums[0] += v0;
+                }
+            } else {
+                // Lagrange weights over current_round bits
+                let mut sequential_lag_poly: LagrangePolynomial<F, SignificantBitOrder> =
+                    LagrangePolynomial::new(&self.verifier_messages_round_comp);
+                let lag_polys_len = Hypercube::<SignificantBitOrder>::stop_value(self.current_round);
+                let mut lag_polys: Vec<F> = vec![F::ONE; lag_polys_len];
+                for (x_index, _) in Hypercube::<SignificantBitOrder>::new(self.num_variables - self.current_round - 1) {
+                    if x_index == 0 {
+                        for (b_index, _) in Hypercube::<SignificantBitOrder>::new(self.current_round) {
+                            lag_polys[b_index] = sequential_lag_poly.next().unwrap();
+                        }
+                    }
+                    let mut partial_0: F = F::ZERO;
+                    for (b_index, _) in Hypercube::<SignificantBitOrder>::new(self.current_round) {
+                        let lag_poly = lag_polys[b_index];
+                        partial_0 += self.stream_iterators[0].next().unwrap() * lag_poly;
+                    }
+                    let mut _partial_1: F = F::ZERO;
+                    for (b_index, _) in Hypercube::<SignificantBitOrder>::new(self.current_round) {
+                        let lag_poly = lag_polys[b_index];
+                        _partial_1 += self.stream_iterators[0].next().unwrap() * lag_poly;
+                    }
+                    sums[0] += partial_0;
+                }
+            }
+            return sums;
+        }
+
         let num_extras = if D > 2 { D - 2 } else { 0 };
         let mut sums: Vec<F> = vec![F::ZERO; 2 + num_extras];
 
@@ -241,15 +311,8 @@ impl<F: Field, S: Stream<F>, const D: usize> BlendyProductProver<F, S, D> {
                         // flat index for tuple in row-major base 'side'
                         let mut idx0 = 0usize; let mut mul = 1usize;
                         for j in 0..D { idx0 += base0[j] * mul; mul *= side; }
-                        let mut idx1 = 0usize; let mut mul2 = 1usize;
-                        for j in 0..D { idx1 += base1[j] * mul2; mul2 *= side; }
                         sums[0] += lag_prod * table[idx0];
-                        sums[1] += lag_prod * table[idx1];
 
-                        // node 0
-                        let mut idx0 = 0usize; let mut mul = 1usize;
-                        for j in 0..D { idx0 += base0[j] * mul; mul *= side; }
-                        sums[0] += lag_prod * table[idx0];
                         // node ∞: ± weights over s ∈ {0,1}^D
                         let mut s_mask = 0usize;
                         loop {

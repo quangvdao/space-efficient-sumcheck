@@ -34,12 +34,11 @@ dependencies = [
 [[package]]
 name = "ark-ec"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43d68f2d516162846c1238e755a7c4d131b892b70cc70c471a8e3ca3ed818fce"
+source = "git+https://github.com/a16z/arkworks-algebra?branch=feat%2Ffewer-reductions#433529b5ddeb93f0fda36d8d2094d3ef51e8aa2e"
 dependencies = [
  "ahash",
  "ark-ff",
- "ark-poly",
+ "ark-poly 0.5.0 (git+https://github.com/a16z/arkworks-algebra?branch=feat%2Ffewer-reductions)",
  "ark-serialize",
  "ark-std",
  "educe",
@@ -55,8 +54,7 @@ dependencies = [
 [[package]]
 name = "ark-ff"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a177aba0ed1e0fbb62aa9f6d0502e9b46dad8c2eab04c14258a1212d2557ea70"
+source = "git+https://github.com/a16z/arkworks-algebra?branch=feat%2Ffewer-reductions#433529b5ddeb93f0fda36d8d2094d3ef51e8aa2e"
 dependencies = [
  "ark-ff-asm",
  "ark-ff-macros",
@@ -75,8 +73,7 @@ dependencies = [
 [[package]]
 name = "ark-ff-asm"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62945a2f7e6de02a31fe400aa489f0e0f5b2502e69f95f853adb82a96c7a6b60"
+source = "git+https://github.com/a16z/arkworks-algebra?branch=feat%2Ffewer-reductions#433529b5ddeb93f0fda36d8d2094d3ef51e8aa2e"
 dependencies = [
  "quote",
  "syn",
@@ -85,8 +82,7 @@ dependencies = [
 [[package]]
 name = "ark-ff-macros"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09be120733ee33f7693ceaa202ca41accd5653b779563608f1234f78ae07c4b3"
+source = "git+https://github.com/a16z/arkworks-algebra?branch=feat%2Ffewer-reductions#433529b5ddeb93f0fda36d8d2094d3ef51e8aa2e"
 dependencies = [
  "num-bigint",
  "num-traits",
@@ -111,10 +107,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-poly"
+version = "0.5.0"
+source = "git+https://github.com/a16z/arkworks-algebra?branch=feat%2Ffewer-reductions#433529b5ddeb93f0fda36d8d2094d3ef51e8aa2e"
+dependencies = [
+ "ahash",
+ "ark-ff",
+ "ark-serialize",
+ "ark-std",
+ "educe",
+ "fnv",
+ "hashbrown",
+]
+
+[[package]]
 name = "ark-serialize"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f4d068aaf107ebcd7dfb52bc748f8030e0fc930ac8e360146ca54c1203088f7"
+source = "git+https://github.com/a16z/arkworks-algebra?branch=feat%2Ffewer-reductions#433529b5ddeb93f0fda36d8d2094d3ef51e8aa2e"
 dependencies = [
  "ark-serialize-derive",
  "ark-std",
@@ -126,8 +135,7 @@ dependencies = [
 [[package]]
 name = "ark-serialize-derive"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "213888f660fddcca0d257e88e54ac05bca01885f258ccdf695bafd77031bb69d"
+source = "git+https://github.com/a16z/arkworks-algebra?branch=feat%2Ffewer-reductions#433529b5ddeb93f0fda36d8d2094d3ef51e8aa2e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -365,8 +373,9 @@ checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 name = "space-efficient-sumcheck"
 version = "0.0.2"
 dependencies = [
+ "ark-bn254",
  "ark-ff",
- "ark-poly",
+ "ark-poly 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "ark-serialize",
  "ark-std",
  "memmap2",
@@ -378,7 +387,7 @@ version = "0.1.0"
 dependencies = [
  "ark-bn254",
  "ark-ff",
- "ark-poly",
+ "ark-poly 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "ark-std",
  "space-efficient-sumcheck",
 ]
@@ -451,3 +460,8 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[patch.unused]]
+name = "ark-bn254"
+version = "0.5.0-alpha.0"
+source = "git+https://github.com/a16z/arkworks-algebra?branch=feat%2Ffewer-reductions#433529b5ddeb93f0fda36d8d2094d3ef51e8aa2e"

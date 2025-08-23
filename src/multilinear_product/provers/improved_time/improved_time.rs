@@ -2,6 +2,8 @@ use ark_ff::Field;
 use ark_std::vec::Vec;
 
 use crate::streams::Stream;
+use crate::interpolation::recursive_toom::product_eval_univariate_accumulate;
+use crate::interpolation::field_mul_small::FieldMulSmall;
 
 pub struct ImprovedTimeProductProver<F: Field, S: Stream<F>, const D: usize> {
     pub claim: F,
@@ -11,7 +13,7 @@ pub struct ImprovedTimeProductProver<F: Field, S: Stream<F>, const D: usize> {
     pub num_variables: usize,
 }
 
-impl<'a, F: Field, S: Stream<F>, const D: usize> ImprovedTimeProductProver<F, S, D> {
+impl<'a, F: FieldMulSmall, S: Stream<F>, const D: usize> ImprovedTimeProductProver<F, S, D> {
     pub fn total_rounds(&self) -> usize {
         self.num_variables
     }
@@ -39,12 +41,10 @@ impl<'a, F: Field, S: Stream<F>, const D: usize> ImprovedTimeProductProver<F, S,
             },
         };
 
-        // Iterate through evaluations
+        // Iterate through evaluations (each i corresponds to a slice over remaining variables)
         for i in 0..(evaluations_len / 2) {
-            let mut prod_g0: F = F::ONE;
-            let mut prod_leading: F = F::ONE;
-            let mut prod_extras: Vec<F> = vec![F::ONE; num_extras];
-
+            // Gather D linear polynomials for this slice
+            let mut pairs: Vec<(F, F)> = Vec::with_capacity(D);
             for j in 0..D {
                 let v0 = match &self.evaluations[j] {
                     None => match &self.streams {
@@ -60,24 +60,11 @@ impl<'a, F: Field, S: Stream<F>, const D: usize> ImprovedTimeProductProver<F, S,
                     },
                     Some(evals) => evals[i | bitmask],
                 };
-                // node 0 and ∞
-                let diff = v1 - v0;
-                prod_g0 *= v0;
-                prod_leading *= diff;
-                let v1 = v0 + diff;
-                // extra nodes z = 2..D-1 evaluated iteratively: val(z) = v1 + (z-1)*diff
-                if num_extras > 0 {
-                    let mut val = v1 + diff;
-                    prod_extras[0] *= val;
-                    for k in 1..num_extras {
-                        val += diff;
-                        prod_extras[k] *= val;
-                    }
-                }
+                pairs.push((v0, v1));
             }
-            sums[0] += prod_g0;
-            sums[1] += prod_leading;
-            for k in 0..num_extras { sums[2 + k] += prod_extras[k]; }
+
+            // Fused accumulation: avoid materializing the full table
+            product_eval_univariate_accumulate::<F, D>(&pairs, &mut sums);
         }
 
         sums
