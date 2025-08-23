@@ -19,7 +19,7 @@ pub struct SpaceProductProver<F: Field, S: Stream<F>, const D: usize> {
 impl<F: Field, S: Stream<F>, const D: usize> SpaceProductProver<F, S, D> {
 	pub fn cty_evaluate(&mut self) -> Vec<F> {
 		let num_extras = if D > 2 { D - 2 } else { 0 };
-		let mut sums: Vec<F> = vec![F::ZERO; 2 + num_extras];
+		let mut sums: Vec<F> = vec![F::ZERO; D];
 
 		// reset the streams
 		self.stream_iterators.iter_mut().for_each(|it| it.reset());
@@ -27,23 +27,22 @@ impl<F: Field, S: Stream<F>, const D: usize> SpaceProductProver<F, S, D> {
 		for (_, _) in Hypercube::<SignificantBitOrder>::new(self.num_variables - self.current_round - 1) {
 			// can avoid unnecessary additions for first round since there is no lag poly: gives a small speedup
 			if self.current_round == 0 {
-				let mut g0 = F::ONE;
+				let mut g1 = F::ONE;
 				let mut leading = F::ONE;
 				let mut extras: Vec<F> = vec![F::ONE; num_extras];
 				for j in 0..D {
 					let v0 = self.stream_iterators[j].next().unwrap();
 					let v1 = self.stream_iterators[j].next().unwrap();
 					let diff = v1 - v0;
-					g0 *= v0;
 					leading *= diff;
+					g1 *= v1;
 					if num_extras > 0 {
-						let v1 = v0 + diff;
 						let mut val = v1 + diff; // z=2
 						extras[0] *= val;
 						for k in 1..num_extras { val += diff; extras[k] *= val; }
 					}
 				}
-				sums[0] += g0; sums[1] += leading; for k in 0..num_extras { sums[2+k] += extras[k]; }
+				if D == 1 { sums[0] += g1; } else { sums[0] += g1; for k in 0..num_extras { sums[1+k] += extras[k]; } sums[D-1] += leading; }
 			} else {
 				let mut partial_0: [F; D] = [F::ZERO; D];
 				let mut lag0: LagrangePolynomial<F, SignificantBitOrder> = LagrangePolynomial::new(&self.verifier_messages);
@@ -63,20 +62,19 @@ impl<F: Field, S: Stream<F>, const D: usize> SpaceProductProver<F, S, D> {
 					}
 				}
 
-				let mut g0 = F::ONE; let mut leading = F::ONE; let mut extras: Vec<F> = vec![F::ONE; num_extras];
+				let mut g1 = F::ONE; let mut leading = F::ONE; let mut extras: Vec<F> = vec![F::ONE; num_extras];
 				for j in 0..D {
-					let v0 = partial_0[j];
-					let diff = partial_1[j] - partial_0[j];
-					g0 *= v0;
+					let v1 = partial_1[j];
+					g1 *= v1;
+					let diff = v1 - partial_0[j];
 					leading *= diff;
 					if num_extras > 0 {
-						let v1 = v0 + diff;
 						let mut val = v1 + diff; // z=2
 						extras[0] *= val;
 						for k in 1..num_extras { val += diff; extras[k] *= val; }
 					}
 				}
-				sums[0] += g0; sums[1] += leading; for k in 0..num_extras { sums[2+k] += extras[k]; }
+				if D == 1 { sums[0] += g1; } else { sums[0] += g1; for k in 0..num_extras { sums[1+k] += extras[k]; } sums[D-1] += leading; }
 			}
 		}
 		sums

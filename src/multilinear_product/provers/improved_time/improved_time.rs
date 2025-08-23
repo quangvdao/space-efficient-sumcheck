@@ -25,9 +25,8 @@ impl<'a, F: FieldMulSmall, S: Stream<F>, const D: usize> ImprovedTimeProductProv
      * from the streams (instead of the tables), which reduces max memory usage by 1/2
      */
     pub fn toom_evaluate(&self) -> Vec<F> {
-        // Message shape: [0, ∞, 2, 3, ..., D-1]
-        let num_extras = if D > 2 { D - 2 } else { 0 };
-        let mut sums: Vec<F> = vec![F::ZERO; 2 + num_extras];
+        // Message shape: [1, 2, ..., D-1, ∞]
+        let mut sums: Vec<F> = vec![F::ZERO; D];
 
         // Calculate the bitmask for the number of free variables
         let bitmask: usize = 1 << (self.num_free_variables() - 1);
@@ -44,7 +43,7 @@ impl<'a, F: FieldMulSmall, S: Stream<F>, const D: usize> ImprovedTimeProductProv
         // Iterate through evaluations (each i corresponds to a slice over remaining variables)
         for i in 0..(evaluations_len / 2) {
             // Gather D linear polynomials for this slice
-            let mut pairs: Vec<(F, F)> = Vec::with_capacity(D);
+            let mut pairs: [(F, F); D] = [(F::ZERO, F::ZERO); D];
             for j in 0..D {
                 let v0 = match &self.evaluations[j] {
                     None => match &self.streams {
@@ -60,7 +59,7 @@ impl<'a, F: FieldMulSmall, S: Stream<F>, const D: usize> ImprovedTimeProductProv
                     },
                     Some(evals) => evals[i | bitmask],
                 };
-                pairs.push((v0, v1));
+                pairs[j] = (v0, v1);
             }
 
             // Fused accumulation: avoid materializing the full table

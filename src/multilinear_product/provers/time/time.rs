@@ -23,9 +23,9 @@ impl<'a, F: Field, S: Stream<F>, const D: usize> TimeProductProver<F, S, D> {
      * from the streams (instead of the tables), which reduces max memory usage by 1/2
      */
     pub fn vsbw_evaluate(&self) -> Vec<F> {
-        // Message shape: [0, ∞, 2, 3, ..., D-1]
+        // Message shape: [1, 2, ..., D-1, ∞] (for D=1: [1])
         let num_extras = if D > 2 { D - 2 } else { 0 };
-        let mut sums: Vec<F> = vec![F::ZERO; 2 + num_extras];
+        let mut sums: Vec<F> = vec![F::ZERO; D];
 
         // Calculate the bitmask for the number of free variables
         let bitmask: usize = 1 << (self.num_free_variables() - 1);
@@ -41,9 +41,9 @@ impl<'a, F: Field, S: Stream<F>, const D: usize> TimeProductProver<F, S, D> {
 
         // Iterate through evaluations
         for i in 0..(evaluations_len / 2) {
-            let mut prod_g0: F = F::ONE;
-            let mut prod_leading: F = F::ONE;
-            let mut prod_extras: Vec<F> = vec![F::ONE; num_extras];
+            let mut prod_g1: F = F::ONE;       // product at x = 1
+            let mut prod_leading: F = F::ONE;  // product at ∞ (top coeffs)
+            let mut prod_extras: Vec<F> = vec![F::ONE; num_extras]; // x = 2..D-1
 
             for j in 0..D {
                 let v0 = match &self.evaluations[j] {
@@ -60,11 +60,10 @@ impl<'a, F: Field, S: Stream<F>, const D: usize> TimeProductProver<F, S, D> {
                     },
                     Some(evals) => evals[i | bitmask],
                 };
-                // node 0 and ∞
+                // values at 1 and ∞
                 let diff = v1 - v0;
-                prod_g0 *= v0;
-                prod_leading *= diff;
-                let v1 = v0 + diff;
+                prod_leading *= diff; // ∞
+                prod_g1 *= v1;
                 // extra nodes z = 2..D-1 evaluated iteratively: val(z) = v1 + (z-1)*diff
                 if num_extras > 0 {
                     let mut val = v1 + diff;
@@ -75,9 +74,13 @@ impl<'a, F: Field, S: Stream<F>, const D: usize> TimeProductProver<F, S, D> {
                     }
                 }
             }
-            sums[0] += prod_g0;
-            sums[1] += prod_leading;
-            for k in 0..num_extras { sums[2 + k] += prod_extras[k]; }
+            if D == 1 {
+                sums[0] += prod_g1; // [1]
+            } else {
+                sums[0] += prod_g1; // 1
+                for k in 0..num_extras { sums[1 + k] += prod_extras[k]; } // 2..D-1
+                sums[D - 1] += prod_leading; // ∞
+            }
         }
 
         sums

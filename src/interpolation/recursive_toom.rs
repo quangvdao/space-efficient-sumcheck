@@ -145,6 +145,62 @@ fn eval_inter8_final<F: FieldMulSmall>(p: [(F, F); 8]) -> [F; 8] {
     ]
 }
 
+// Fused accumulate variants for layout [1, 2, ..., D-1, ∞]
+#[inline]
+fn eval_inter2_final_accumulate<F: FieldMulSmall>(p0: (F, F), p1: (F, F), sums: &mut [F]) {
+    let r1 = p0.1 * p1.1; // g(1)
+    let r_inf = (p0.1 - p0.0) * (p1.1 - p1.0); // ∞
+    sums[0] += r1;
+    sums[1] += r_inf;
+}
+
+#[inline]
+fn eval_inter4_final_accumulate<F: FieldMulSmall>(p: [(F, F); 4], sums: &mut [F]) {
+    #[inline]
+    fn helper<F: FieldMulSmall>(fx0: F, fx1: F, f_inf: F) -> F {
+        dbl(fx1 + f_inf) - fx0
+    }
+    let (a1, a2, a_inf) = eval_inter2(p[0], p[1]);
+    let a3 = helper(a1, a2, a_inf);
+    let (b1, b2, b_inf) = eval_inter2(p[2], p[3]);
+    let b3 = helper(b1, b2, b_inf);
+    sums[0] += a1 * b1; // 1
+    sums[1] += a2 * b2; // 2
+    sums[2] += a3 * b3; // 3
+    sums[3] += a_inf * b_inf; // ∞
+}
+
+#[inline]
+fn eval_inter8_final_accumulate<F: FieldMulSmall>(p: [(F, F); 8], sums: &mut [F]) {
+    // innards of eval_inter8_final (accumulating directly)
+    #[inline]
+    fn helper_pair<F: FieldMulSmall>(f: &[F; 4], f_inf6: F) -> (F, F) {
+        let f3m2 = f[3] - f[2];
+        let f4 = dbl(dbl(f_inf6 + f3m2 + f[1]) - f[2]) - f[0];
+        let f5 = dbl(dbl(f4 - f3m2 + f_inf6) - f[3]) - f[1];
+        (f4, f5)
+    }
+    #[inline]
+    fn batch_helper<F: FieldMulSmall>(f0: F, f1: F, f2: F, f3: F, f_inf: F) -> (F, F, F) {
+        let f_inf6 = mul6(f_inf);
+        let (f4, f5) = helper_pair(&[f0, f1, f2, f3], f_inf6);
+        let f6 = dbl(dbl(f_inf6 + f5 - f4 + f3) - f4) - f2;
+        (f4, f5, f6)
+    }
+    let (a1, a2, a3, a4, a_inf) = eval_inter4(p[0..4].try_into().unwrap());
+    let (a5, a6, a7) = batch_helper(a1, a2, a3, a4, a_inf);
+    let (b1, b2, b3, b4, b_inf) = eval_inter4(p[4..8].try_into().unwrap());
+    let (b5, b6, b7) = batch_helper(b1, b2, b3, b4, b_inf);
+    sums[0] += a1 * b1;
+    sums[1] += a2 * b2;
+    sums[2] += a3 * b3;
+    sums[3] += a4 * b4;
+    sums[4] += a5 * b5;
+    sums[5] += a6 * b6;
+    sums[6] += a7 * b7;
+    sums[7] += a_inf * b_inf;
+}
+
 // d = 16: [1, 2, ..., 7, 8, inf] -> [1, 2, ..., 16, inf]
 #[inline]
 fn eval_inter16<F: FieldMulSmall>(p: [(F, F); 16]) -> [F; 17] {
@@ -440,7 +496,8 @@ pub fn product_eval_univariate_full<F: Field>(pairs: &[(F, F)]) -> Vec<F> {
 }
 
 /// Fused variant: directly accumulates the contribution of the product table on U_D
-/// into `sums` with message layout [0, ∞, 2, 3, ..., D-1].
+/// into `sums` with message layout [1, 2, ..., D-1, ∞].
+/// For D = 1, the message is [1].
 /// Precondition: sums.len() == if D>1 { D } else { 1 }.
 pub fn product_eval_univariate_accumulate<F: FieldMulSmall, const D: usize>(pairs: &[(F, F)], sums: &mut [F]) {
     let d = pairs.len();
@@ -448,19 +505,15 @@ pub fn product_eval_univariate_accumulate<F: FieldMulSmall, const D: usize>(pair
     debug_assert_eq!(sums.len(), if D > 1 { D } else { 1 });
 
     if D == 1 {
-        let a0 = pairs[0].0;
-        sums[0] += a0;
+        let (_a0, a1) = pairs[0];
+        sums[0] += a1; // g(1)
         return;
     }
 
     // Fast paths for small D using evaluation-based Toom-style formulas
     if D == 2 {
-        let (p0, p1) = pairs[0];
-        let (q0, q1) = pairs[1];
-        let r0 = p0 * q0;
-        let r_inf = (p1 - p0) * (q1 - q0);
-        sums[0] += r0;
-        sums[1] += r_inf;
+        // [1, ∞]
+        eval_inter2_final_accumulate(pairs[0], pairs[1], sums);
         return;
     }
     if D == 3 {
@@ -479,94 +532,46 @@ pub fn product_eval_univariate_accumulate<F: FieldMulSmall, const D: usize>(pair
         let c_inf = c1 - c0;
         let c_m1 = c0 - c_inf; // 2*c0 - c1
         // point-wise products
-        let r0 = a0q * c0;
-        let r1 = a1q * c1;
+        let _r0 = a0q * c0;
+        let r1 = a1q * c1; // g(1)
         let r_m1 = a_m1 * c_m1;
         let r_inf = a_infq * c_inf;
         // derive r2 from {0,1,-1,∞}
-        let r2 = -r0.mul_u64(3) + r1.mul_u64(3) + r_m1 + r_inf.mul_u64(6);
-        sums[0] += r0;
-        sums[1] += r_inf;
-        sums[2] += r2;
+        let r2 = -_r0.mul_u64(3) + r1.mul_u64(3) + r_m1 + r_inf.mul_u64(6);
+        // [1, 2, ∞]
+        sums[0] += r1;
+        sums[1] += r2;
+        sums[2] += r_inf;
         return;
     }
     if D == 4 {
-        // Two quadratic blocks A and B from pairs 0..1 and 2..3
-        let (p0, p1) = pairs[0];
-        let (q0, q1) = pairs[1];
-        let (r0, r1) = pairs[2];
-        let (s0, s1) = pairs[3];
-        // A on {0,1,∞}
-        let a0 = p0 * q0;
-        let a1 = p1 * q1;
-        let a_inf = (p1 - p0) * (q1 - q0);
-        // B on {0,1,∞}
-        let b0 = r0 * s0;
-        let b1 = r1 * s1;
-        let b_inf = (r1 - r0) * (s1 - s0);
-        // extend each to -1 and 2
-        let a_s0 = a0 + a_inf;
-        let a_s1 = a1 + a_inf;
-        let a_d0 = a_s0 + a_s0;
-        let a_d1 = a_s1 + a_s1;
-        let a_m1 = a_d0 - a1; // A(-1)
-        let a_2 = a_d1 - a0;  // A(2)
-        let b_s0 = b0 + b_inf;
-        let b_s1 = b1 + b_inf;
-        let b_d0 = b_s0 + b_s0;
-        let b_d1 = b_s1 + b_s1;
-        let b_m1 = b_d0 - b1;
-        let b_2 = b_d1 - b0;
-        // point-wise products at base 5 points
-        let f0 = a0 * b0;
-        let f1 = a1 * b1;
-        let f_m1 = a_m1 * b_m1;
-        let f2 = a_2 * b_2;
-        let f_inf = a_inf * b_inf;
-        // derive f3 from quartic base points (optimized alt formula)
-        // f3 = 24 f_inf + 2*(2*(f0 - f1 + f2) - f1) - f_m1
-        let f_inf24 = f_inf.mul_u64(24);
-        let inner = (f0 - f1 + f2) + (f0 - f1 + f2); // 2*(f0 - f1 + f2)
-        let mid = inner + inner - f1 - f1; // 4*(f0 - f1 + f2) - 2*f1
-        let f3 = f_inf24 + mid - f_m1;
-        // accumulate [0, ∞, 2, 3]
-        sums[0] += f0;
-        sums[1] += f_inf;
-        sums[2] += f2;
-        sums[3] += f3;
+        // [1, 2, 3, ∞]
+        let arr: [(F, F); 4] = pairs.try_into().unwrap();
+        eval_inter4_final_accumulate(arr, sums);
         return;
     }
 
     // Fast paths for larger power-of-two D using improved univariate evaluation
     if D == 8 {
+        // [1..7, ∞]
         let arr: [(F, F); 8] = pairs.try_into().unwrap();
-        let r = eval_inter8(arr); // [g(1)..g(8), g(∞)]
-        // g(0)
-        let mut g0 = F::ONE;
-        for (e0, _) in arr { g0 *= e0; }
-        sums[0] += g0;
-        sums[1] += r[8]; // ∞
-        for k in 2..8 { sums[2 + (k - 2)] += r[k - 1]; } // 2..7
+        eval_inter8_final_accumulate(arr, sums);
         return;
     }
     if D == 16 {
+        // [1..15, ∞]
         let arr: [(F, F); 16] = pairs.try_into().unwrap();
-        let r = eval_inter16(arr); // [g(1)..g(16), g(∞)]
-        let mut g0 = F::ONE;
-        for (e0, _) in arr { g0 *= e0; }
-        sums[0] += g0;
-        sums[1] += r[16]; // ∞
-        for k in 2..16 { sums[2 + (k - 2)] += r[k - 1]; } // 2..15
+        let r = eval_inter16_final(arr); // [g(1)..g(15), g(∞)]
+        for i in 0..15 { sums[i] += r[i]; }
+        sums[15] += r[15];
         return;
     }
     if D == 32 {
+        // [1..31, ∞]
         let arr: [(F, F); 32] = pairs.try_into().unwrap();
-        let r = eval_inter32(arr); // [g(1)..g(32), g(∞)]
-        let mut g0 = F::ONE;
-        for (e0, _) in arr { g0 *= e0; }
-        sums[0] += g0;
-        sums[1] += r[32]; // ∞
-        for k in 2..32 { sums[2 + (k - 2)] += r[k - 1]; } // 2..31
+        let r = eval_inter32_final(arr); // [g(1)..g(31), g(∞)]
+        for i in 0..31 { sums[i] += r[i]; }
+        sums[31] += r[31];
         return;
     }
 
@@ -598,10 +603,9 @@ pub fn product_eval_univariate_accumulate<F: FieldMulSmall, const D: usize>(pair
     let left_ext = extrapolate_from_u_k_to_u_n::<F>(&left, D);
     let right_ext = extrapolate_from_u_k_to_u_n::<F>(&right, D);
 
-    // Accumulate message entries: [0, ∞, 2, 3, ..., D-1]
-    sums[0] += left_ext[0] * right_ext[0];
-    sums[1] += left_ext[D] * right_ext[D];
-    for k in 2..D { sums[2 + (k - 2)] += left_ext[k] * right_ext[k]; }
+    // Accumulate message entries: [1, 2, ..., D-1, ∞]
+    for k in 1..D { sums[k - 1] += left_ext[k] * right_ext[k]; }
+    sums[D - 1] += left_ext[D] * right_ext[D];
 }
 
 
