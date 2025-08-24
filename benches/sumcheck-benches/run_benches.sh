@@ -27,6 +27,13 @@ while [ $# -gt 0 ]; do
       shift;
       if [ -n "$1" ]; then
         D_OVERRIDE="$1";
+        # Validate d value early
+        case "$D_OVERRIDE" in
+          2|3|4|8|16) ;;
+          *) 
+            echo "Error: Unsupported d value: $D_OVERRIDE. Product algorithms only support d ∈ {2, 3, 4, 8, 16}"
+            exit 1;;
+        esac
         shift;
       fi;;
     *)
@@ -96,10 +103,22 @@ for algorithm in $algorithms; do
             esac
             if command -v gtime >/dev/null 2>&1; then
               output=`(gtime -v "$BIN" $algorithm_label $field $num_vars $stage_size$D_ARG) 2>&1`
+              exit_code=$?
+              if [ $exit_code -ne 0 ]; then
+                echo "ERROR: Benchmark failed for $algorithm_label $field $num_vars $stage_size$D_ARG"
+                echo "Output: $output"
+                exit $exit_code
+              fi
               user_time_seconds=$(echo "$output" | awk -F': ' '/User time \(seconds\)/{print $2; exit}')
               ram_kilobytes=$(echo "$output" | awk -F': ' '/Maximum resident set size \(kbytes\)/{print $2; exit}')
             else
               output=`(/usr/bin/time -l "$BIN" $algorithm_label $field $num_vars $stage_size$D_ARG) 2>&1`
+              exit_code=$?
+              if [ $exit_code -ne 0 ]; then
+                echo "ERROR: Benchmark failed for $algorithm_label $field $num_vars $stage_size$D_ARG"
+                echo "Output: $output"
+                exit $exit_code
+              fi
               # BSD time output parsing (best-effort)
               user_time_seconds=$(echo "$output" | awk '/[[:space:]]user[[:space:]]/{print $(NF-3); exit}')
               ram_kilobytes=$(echo "$output" | awk -F': ' '/maximum resident set size/{print $2; exit}')

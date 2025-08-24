@@ -28,8 +28,7 @@ impl<F: Field, const D: usize> ProductSumcheck<F, D> {
         let mut prev_target_sum: F = prover.claim();
         while let Some(message) = prover.next_message(verifier_message) {
             debug_assert!(message.len() == D, "expected exactly D={} message entries", D);
-            // New scheme only: message nodes are [0, ∞, 2, 3, ...] when D>1; when D==1: [0]
-            debug_assert!(D == 1 || message.len() >= 2, "prover must send at least [g(0), g(∞)] when D>1");
+            // Blendy/StreamingEval scheme: [g(1), g(2), ..., g(D-1), g(∞)] for D>1; when D==1: [g(1)]
 
             // Handle how to proceed
             // Persist message after acceptance decision
@@ -41,14 +40,14 @@ impl<F: Field, const D: usize> ProductSumcheck<F, D> {
             verifier_messages.push(r);
 
             // Compute next target sum = g_k(r)
-            let g0 = message[0];
-            let g1 = prev_target_sum - g0;
+            let g1 = message[0];
+            let g0 = prev_target_sum - g1;
             let next_target_sum: F = if D == 1 {
                 // degree 1 per round over {0,1}
                 g0 + r * (g1 - g0)
             } else {
-                let leading = message[1];
-                let extras = if message.len() > 2 { &message[2..] } else { &[] };
+                let leading = message[D - 1]; // ∞ at last position
+                let extras = if D > 2 { &message[1..(D - 1)] } else { &[] };
                 LagrangePolynomial::<F,GraycodeOrder>::evaluate_from_infty_and_standard_nodes(
                     r,
                     leading,

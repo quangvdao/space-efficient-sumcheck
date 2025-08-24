@@ -3,14 +3,16 @@ use std::collections::BTreeSet;
 
 use crate::{
 	messages::VerifierMessages,
-	multilinear_product::{EvalToomProductProver, EvalToomProductProverConfig, TimeProductProver},
+	multilinear_product::{StreamingEvalProductProver, StreamingEvalProductProverConfig, TimeProductProver},
 	order_strategy::SignificantBitOrder,
 	prover::Prover,
 	streams::{Stream, StreamIterator},
 };
 
-impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for EvalToomProductProver<F, S, D> {
-	type ProverConfig = EvalToomProductProverConfig<F, S>;
+impl<F: Field, S: Stream<F>, const D: usize> Prover<F>
+	for StreamingEvalProductProver<F, S, D>
+{
+	type ProverConfig = StreamingEvalProductProverConfig<F, S>;
 	type ProverMessage = Option<Vec<F>>;
 	type VerifierMessage = Option<F>;
 
@@ -64,6 +66,30 @@ impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for EvalToomProductProver
 			.ok()
 			.expect("requires exactly D streams");
 
+		// Build window vector omegas from runtime num_stages (k)
+		let mut windows: Vec<usize> = Vec::new();
+		{
+			let delta = ((D + 1) as f64).log2();
+			let mut j_prime: usize = 0;
+			// Time-constrained phase
+			while j_prime < num_variables {
+				let omega = ((j_prime as f64) / (delta - 1.0)).floor() as usize;
+				let omega = omega.max(1);
+				if j_prime + omega > num_variables { break; }
+				windows.push(omega);
+				j_prime += omega;
+				// stop when window size reaches space phase target
+				let omega_space = (num_variables / (num_stages * (delta as usize).max(1))).max(1);
+				if omega >= omega_space { break; }
+			}
+			// Space-constrained phase
+			let omega_space = (num_variables / (num_stages * (delta as usize).max(1))).max(1);
+			while j_prime + omega_space <= num_variables {
+				windows.push(omega_space);
+				j_prime += omega_space;
+			}
+		}
+
 		Self {
 			claim: prover_config.claim,
 			current_round: 0,
@@ -71,6 +97,7 @@ impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for EvalToomProductProver
 			stream_iterators,
 			num_stages,
 			num_variables,
+			windows,
 			last_round_phase1,
 			verifier_messages: VerifierMessages::new(&vec![]),
 			verifier_messages_round_comp: VerifierMessages::new(&vec![]),
@@ -80,6 +107,10 @@ impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for EvalToomProductProver
 			state_comp_set,
 			switched_to_vsbw: false,
 			vsbw_prover,
+			current_window_idx: 0,
+			window_offset: 0,
+			reduced_grid: None,
+			reduced_shape: Vec::new(),
 		}
 	}
 

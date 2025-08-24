@@ -31,6 +31,24 @@ fn check_if_number(input_string: String) -> bool {
     }
 }
 
+fn validate_d_value_for_product_algorithms(algorithm_label: &AlgorithmLabel, d: usize) -> Result<(), String> {
+    match algorithm_label {
+        AlgorithmLabel::ProductBlendy 
+        | AlgorithmLabel::ProductVSBW 
+        | AlgorithmLabel::ProductCTY 
+        | AlgorithmLabel::ProductImprovedTime => {
+            match d {
+                2 | 3 | 4 | 8 | 16 => Ok(()),
+                _ => Err(format!(
+                    "Unsupported d value: {}. Product algorithms only support d ∈ {{2, 3, 4, 8, 16}}",
+                    d
+                ))
+            }
+        }
+        _ => Ok(()), // Non-product algorithms don't use d parameter
+    }
+}
+
 pub fn validate_and_format_command_line_args(argsv: Vec<String>) -> BenchArgs {
     // Check if the correct number of command line arguments is provided
     if !(argsv.len() == 5 || argsv.len() == 6) {
@@ -97,6 +115,13 @@ pub fn validate_and_format_command_line_args(argsv: Vec<String>) -> BenchArgs {
     } else {
         2
     };
+    
+    // Validate d value for Product algorithms
+    if let Err(error_msg) = validate_d_value_for_product_algorithms(&algorithm_label, d) {
+        eprintln!("Error: {}", error_msg);
+        std::process::exit(1);
+    }
+    
     return BenchArgs {
         field_label,
         algorithm_label,

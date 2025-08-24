@@ -4,7 +4,7 @@ use crate::{prover::ProductProverConfig, streams::Stream};
 
 const DEFAULT_NUM_STAGES: usize = 2;
 
-pub struct EvalToomProductProverConfig<F, S>
+pub struct StreamingEvalProductProverConfig<F, S>
 where
 	F: Field,
 	S: Stream<F>,
@@ -15,7 +15,7 @@ where
 	pub streams: Vec<S>,
 }
 
-impl<'a, F, S> EvalToomProductProverConfig<F, S>
+impl<'a, F, S> StreamingEvalProductProverConfig<F, S>
 where
 	F: Field,
 	S: Stream<F>,
@@ -30,7 +30,9 @@ where
 	}
 }
 
-impl<F: Field, S: Stream<F>> ProductProverConfig<F, S> for EvalToomProductProverConfig<F, S> {
+impl<F: Field, S: Stream<F>> ProductProverConfig<F, S>
+	for StreamingEvalProductProverConfig<F, S>
+{
 	fn default(claim: F, num_variables: usize, streams: Vec<S>) -> Self {
 		Self {
 			claim,
