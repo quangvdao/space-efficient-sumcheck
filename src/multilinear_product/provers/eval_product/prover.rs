@@ -1,4 +1,5 @@
 use ark_ff::Field;
+use crate::interpolation::field_mul_small::FieldMulSmall;
 use std::collections::BTreeSet;
 
 use crate::{
@@ -9,7 +10,7 @@ use crate::{
 	streams::{Stream, StreamIterator},
 };
 
-impl<F: Field, S: Stream<F>, const D: usize> Prover<F>
+impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> Prover<F>
 	for StreamingEvalProductProver<F, S, D>
 {
 	type ProverConfig = StreamingEvalProductProverConfig<F, S>;

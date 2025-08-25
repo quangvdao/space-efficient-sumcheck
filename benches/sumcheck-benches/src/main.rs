@@ -8,14 +8,16 @@ use space_efficient_sumcheck::{
         TimeProverConfig,
     },
     multilinear_product::{
-        BlendyProductProver, BlendyProductProverConfig, TimeProductProver, TimeProductProverConfig, SpaceProductProver,
-        SpaceProductProverConfig, ImprovedTimeProductProver, ImprovedTimeProductProverConfig,
+        BlendyProductProver, BlendyProductProverConfig, ImprovedTimeProductProver,
+        ImprovedTimeProductProverConfig, SpaceProductProver, SpaceProductProverConfig,
+        TimeProductProver, TimeProductProverConfig,
     },
     // order_strategy::SignificantBitOrder,
     prover::{Prover, ProverConfig},
     streams::{multivariate_claim, multivariate_product_claim},
     tests::{BenchStream, F128, F64},
-    ProductSumcheck, Sumcheck,
+    ProductSumcheck,
+    Sumcheck,
 };
 
 pub mod validation;
@@ -34,11 +36,10 @@ fn run_on_field<F: Field>(bench_args: BenchArgs) {
                     bench_args.num_variables,
                     s,
                 );
-            let _transcript =
-                Sumcheck::<F>::prove::<BenchStream<F>, BlendyProver<F, BenchStream<F>>>(
-                    &mut BlendyProver::<F, BenchStream<F>>::new(config),
-                    &mut rng,
-                );
+            let _transcript = Sumcheck::<F>::prove::<BenchStream<F>, BlendyProver<F, BenchStream<F>>>(
+                &mut BlendyProver::<F, BenchStream<F>>::new(config),
+                &mut rng,
+            );
         }
         AlgorithmLabel::VSBW => {
             let config: TimeProverConfig<F, BenchStream<F>> =
@@ -72,11 +73,51 @@ fn run_on_field<F: Field>(bench_args: BenchArgs) {
                     streams: vec![s.clone(); bench_args.d],
                 };
             match bench_args.d {
-                2 => { let _ = ProductSumcheck::<F, 2>::prove::<BenchStream<F>, TimeProductProver<F, BenchStream<F>, 2>>( &mut TimeProductProver::<F, BenchStream<F>, 2>::new(config), &mut rng ); }
-                3 => { let _ = ProductSumcheck::<F, 3>::prove::<BenchStream<F>, TimeProductProver<F, BenchStream<F>, 3>>( &mut TimeProductProver::<F, BenchStream<F>, 3>::new(config), &mut rng ); }
-                4 => { let _ = ProductSumcheck::<F, 4>::prove::<BenchStream<F>, TimeProductProver<F, BenchStream<F>, 4>>( &mut TimeProductProver::<F, BenchStream<F>, 4>::new(config), &mut rng ); }
-                8 => { let _ = ProductSumcheck::<F, 8>::prove::<BenchStream<F>, TimeProductProver<F, BenchStream<F>, 8>>( &mut TimeProductProver::<F, BenchStream<F>, 8>::new(config), &mut rng ); }
-                16 => { let _ = ProductSumcheck::<F, 16>::prove::<BenchStream<F>, TimeProductProver<F, BenchStream<F>, 16>>( &mut TimeProductProver::<F, BenchStream<F>, 16>::new(config), &mut rng ); }
+                2 => {
+                    let _ = ProductSumcheck::<F, 2>::prove::<
+                        BenchStream<F>,
+                        TimeProductProver<F, BenchStream<F>, 2>,
+                    >(
+                        &mut TimeProductProver::<F, BenchStream<F>, 2>::new(config),
+                        &mut rng,
+                    );
+                }
+                3 => {
+                    let _ = ProductSumcheck::<F, 3>::prove::<
+                        BenchStream<F>,
+                        TimeProductProver<F, BenchStream<F>, 3>,
+                    >(
+                        &mut TimeProductProver::<F, BenchStream<F>, 3>::new(config),
+                        &mut rng,
+                    );
+                }
+                4 => {
+                    let _ = ProductSumcheck::<F, 4>::prove::<
+                        BenchStream<F>,
+                        TimeProductProver<F, BenchStream<F>, 4>,
+                    >(
+                        &mut TimeProductProver::<F, BenchStream<F>, 4>::new(config),
+                        &mut rng,
+                    );
+                }
+                8 => {
+                    let _ = ProductSumcheck::<F, 8>::prove::<
+                        BenchStream<F>,
+                        TimeProductProver<F, BenchStream<F>, 8>,
+                    >(
+                        &mut TimeProductProver::<F, BenchStream<F>, 8>::new(config),
+                        &mut rng,
+                    );
+                }
+                16 => {
+                    let _ = ProductSumcheck::<F, 16>::prove::<
+                        BenchStream<F>,
+                        TimeProductProver<F, BenchStream<F>, 16>,
+                    >(
+                        &mut TimeProductProver::<F, BenchStream<F>, 16>::new(config),
+                        &mut rng,
+                    );
+                }
                 _ => panic!("Unsupported d value: {}", bench_args.d),
             }
         }
@@ -89,11 +130,51 @@ fn run_on_field<F: Field>(bench_args: BenchArgs) {
                     streams: vec![s.clone(); bench_args.d],
                 };
             match bench_args.d {
-                2 => { let _ = ProductSumcheck::<F, 2>::prove::<BenchStream<F>, BlendyProductProver<F, BenchStream<F>, 2>>( &mut BlendyProductProver::<F, BenchStream<F>, 2>::new(config), &mut rng ); }
-                3 => { let _ = ProductSumcheck::<F, 3>::prove::<BenchStream<F>, BlendyProductProver<F, BenchStream<F>, 3>>( &mut BlendyProductProver::<F, BenchStream<F>, 3>::new(config), &mut rng ); }
-                4 => { let _ = ProductSumcheck::<F, 4>::prove::<BenchStream<F>, BlendyProductProver<F, BenchStream<F>, 4>>( &mut BlendyProductProver::<F, BenchStream<F>, 4>::new(config), &mut rng ); }
-                8 => { let _ = ProductSumcheck::<F, 8>::prove::<BenchStream<F>, BlendyProductProver<F, BenchStream<F>, 8>>( &mut BlendyProductProver::<F, BenchStream<F>, 8>::new(config), &mut rng ); }
-                16 => { let _ = ProductSumcheck::<F, 16>::prove::<BenchStream<F>, BlendyProductProver<F, BenchStream<F>, 16>>( &mut BlendyProductProver::<F, BenchStream<F>, 16>::new(config), &mut rng ); }
+                2 => {
+                    let _ = ProductSumcheck::<F, 2>::prove::<
+                        BenchStream<F>,
+                        BlendyProductProver<F, BenchStream<F>, 2>,
+                    >(
+                        &mut BlendyProductProver::<F, BenchStream<F>, 2>::new(config),
+                        &mut rng,
+                    );
+                }
+                3 => {
+                    let _ = ProductSumcheck::<F, 3>::prove::<
+                        BenchStream<F>,
+                        BlendyProductProver<F, BenchStream<F>, 3>,
+                    >(
+                        &mut BlendyProductProver::<F, BenchStream<F>, 3>::new(config),
+                        &mut rng,
+                    );
+                }
+                4 => {
+                    let _ = ProductSumcheck::<F, 4>::prove::<
+                        BenchStream<F>,
+                        BlendyProductProver<F, BenchStream<F>, 4>,
+                    >(
+                        &mut BlendyProductProver::<F, BenchStream<F>, 4>::new(config),
+                        &mut rng,
+                    );
+                }
+                8 => {
+                    let _ = ProductSumcheck::<F, 8>::prove::<
+                        BenchStream<F>,
+                        BlendyProductProver<F, BenchStream<F>, 8>,
+                    >(
+                        &mut BlendyProductProver::<F, BenchStream<F>, 8>::new(config),
+                        &mut rng,
+                    );
+                }
+                16 => {
+                    let _ = ProductSumcheck::<F, 16>::prove::<
+                        BenchStream<F>,
+                        BlendyProductProver<F, BenchStream<F>, 16>,
+                    >(
+                        &mut BlendyProductProver::<F, BenchStream<F>, 16>::new(config),
+                        &mut rng,
+                    );
+                }
                 _ => panic!("Unsupported d value: {}", bench_args.d),
             }
         }
@@ -105,11 +186,51 @@ fn run_on_field<F: Field>(bench_args: BenchArgs) {
                     streams: vec![s.clone(); bench_args.d],
                 };
             match bench_args.d {
-                2 => { let _ = ProductSumcheck::<F, 2>::prove::<BenchStream<F>, SpaceProductProver<F, BenchStream<F>, 2>>( &mut SpaceProductProver::<F, BenchStream<F>, 2>::new(config), &mut rng ); }
-                3 => { let _ = ProductSumcheck::<F, 3>::prove::<BenchStream<F>, SpaceProductProver<F, BenchStream<F>, 3>>( &mut SpaceProductProver::<F, BenchStream<F>, 3>::new(config), &mut rng ); }
-                4 => { let _ = ProductSumcheck::<F, 4>::prove::<BenchStream<F>, SpaceProductProver<F, BenchStream<F>, 4>>( &mut SpaceProductProver::<F, BenchStream<F>, 4>::new(config), &mut rng ); }
-                8 => { let _ = ProductSumcheck::<F, 8>::prove::<BenchStream<F>, SpaceProductProver<F, BenchStream<F>, 8>>( &mut SpaceProductProver::<F, BenchStream<F>, 8>::new(config), &mut rng ); }
-                16 => { let _ = ProductSumcheck::<F, 16>::prove::<BenchStream<F>, SpaceProductProver<F, BenchStream<F>, 16>>( &mut SpaceProductProver::<F, BenchStream<F>, 16>::new(config), &mut rng ); }
+                2 => {
+                    let _ = ProductSumcheck::<F, 2>::prove::<
+                        BenchStream<F>,
+                        SpaceProductProver<F, BenchStream<F>, 2>,
+                    >(
+                        &mut SpaceProductProver::<F, BenchStream<F>, 2>::new(config),
+                        &mut rng,
+                    );
+                }
+                3 => {
+                    let _ = ProductSumcheck::<F, 3>::prove::<
+                        BenchStream<F>,
+                        SpaceProductProver<F, BenchStream<F>, 3>,
+                    >(
+                        &mut SpaceProductProver::<F, BenchStream<F>, 3>::new(config),
+                        &mut rng,
+                    );
+                }
+                4 => {
+                    let _ = ProductSumcheck::<F, 4>::prove::<
+                        BenchStream<F>,
+                        SpaceProductProver<F, BenchStream<F>, 4>,
+                    >(
+                        &mut SpaceProductProver::<F, BenchStream<F>, 4>::new(config),
+                        &mut rng,
+                    );
+                }
+                8 => {
+                    let _ = ProductSumcheck::<F, 8>::prove::<
+                        BenchStream<F>,
+                        SpaceProductProver<F, BenchStream<F>, 8>,
+                    >(
+                        &mut SpaceProductProver::<F, BenchStream<F>, 8>::new(config),
+                        &mut rng,
+                    );
+                }
+                16 => {
+                    let _ = ProductSumcheck::<F, 16>::prove::<
+                        BenchStream<F>,
+                        SpaceProductProver<F, BenchStream<F>, 16>,
+                    >(
+                        &mut SpaceProductProver::<F, BenchStream<F>, 16>::new(config),
+                        &mut rng,
+                    );
+                }
                 _ => panic!("Unsupported d value: {}", bench_args.d),
             }
         }
@@ -117,7 +238,9 @@ fn run_on_field<F: Field>(bench_args: BenchArgs) {
     };
 }
 
-fn run_product_improved_time<F: Field + space_efficient_sumcheck::interpolation::field_mul_small::FieldMulSmall>(
+fn run_product_improved_time<
+    F: Field + space_efficient_sumcheck::interpolation::field_mul_small::FieldMulSmall,
+>(
     bench_args: BenchArgs,
 ) {
     let mut rng = ark_std::test_rng();
@@ -129,11 +252,51 @@ fn run_product_improved_time<F: Field + space_efficient_sumcheck::interpolation:
             streams: vec![s.clone(); bench_args.d],
         };
     match bench_args.d {
-        2 => { let _ = ProductSumcheck::<F, 2>::prove::<BenchStream<F>, ImprovedTimeProductProver<F, BenchStream<F>, 2>>( &mut ImprovedTimeProductProver::<F, BenchStream<F>, 2>::new(config), &mut rng ); }
-        3 => { let _ = ProductSumcheck::<F, 3>::prove::<BenchStream<F>, ImprovedTimeProductProver<F, BenchStream<F>, 3>>( &mut ImprovedTimeProductProver::<F, BenchStream<F>, 3>::new(config), &mut rng ); }
-        4 => { let _ = ProductSumcheck::<F, 4>::prove::<BenchStream<F>, ImprovedTimeProductProver<F, BenchStream<F>, 4>>( &mut ImprovedTimeProductProver::<F, BenchStream<F>, 4>::new(config), &mut rng ); }
-        8 => { let _ = ProductSumcheck::<F, 8>::prove::<BenchStream<F>, ImprovedTimeProductProver<F, BenchStream<F>, 8>>( &mut ImprovedTimeProductProver::<F, BenchStream<F>, 8>::new(config), &mut rng ); }
-        16 => { let _ = ProductSumcheck::<F, 16>::prove::<BenchStream<F>, ImprovedTimeProductProver<F, BenchStream<F>, 16>>( &mut ImprovedTimeProductProver::<F, BenchStream<F>, 16>::new(config), &mut rng ); }
+        2 => {
+            let _ = ProductSumcheck::<F, 2>::prove::<
+                BenchStream<F>,
+                ImprovedTimeProductProver<F, BenchStream<F>, 2>,
+            >(
+                &mut ImprovedTimeProductProver::<F, BenchStream<F>, 2>::new(config),
+                &mut rng,
+            );
+        }
+        3 => {
+            let _ = ProductSumcheck::<F, 3>::prove::<
+                BenchStream<F>,
+                ImprovedTimeProductProver<F, BenchStream<F>, 3>,
+            >(
+                &mut ImprovedTimeProductProver::<F, BenchStream<F>, 3>::new(config),
+                &mut rng,
+            );
+        }
+        4 => {
+            let _ = ProductSumcheck::<F, 4>::prove::<
+                BenchStream<F>,
+                ImprovedTimeProductProver<F, BenchStream<F>, 4>,
+            >(
+                &mut ImprovedTimeProductProver::<F, BenchStream<F>, 4>::new(config),
+                &mut rng,
+            );
+        }
+        8 => {
+            let _ = ProductSumcheck::<F, 8>::prove::<
+                BenchStream<F>,
+                ImprovedTimeProductProver<F, BenchStream<F>, 8>,
+            >(
+                &mut ImprovedTimeProductProver::<F, BenchStream<F>, 8>::new(config),
+                &mut rng,
+            );
+        }
+        16 => {
+            let _ = ProductSumcheck::<F, 16>::prove::<
+                BenchStream<F>,
+                ImprovedTimeProductProver<F, BenchStream<F>, 16>,
+            >(
+                &mut ImprovedTimeProductProver::<F, BenchStream<F>, 16>::new(config),
+                &mut rng,
+            );
+        }
         _ => panic!("Unsupported d value: {}", bench_args.d),
     }
 }

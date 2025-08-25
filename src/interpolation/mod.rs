@@ -1,5 +1,5 @@
 mod lagrange_polynomial;
 pub use lagrange_polynomial::LagrangePolynomial;
-pub mod recursive_toom;
+pub mod univariate;
 pub mod field_mul_small;
 pub mod multivariate;

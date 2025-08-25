@@ -2,7 +2,7 @@ use ark_ff::Field;
 use ark_std::vec::Vec;
 
 use crate::streams::Stream;
-use crate::interpolation::recursive_toom::product_eval_univariate_accumulate;
+use crate::interpolation::univariate::product_eval_univariate_accumulate;
 use crate::interpolation::field_mul_small::FieldMulSmall;
 
 pub struct ImprovedTimeProductProver<F: Field, S: Stream<F>, const D: usize> {

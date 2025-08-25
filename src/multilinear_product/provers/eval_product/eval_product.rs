@@ -3,12 +3,31 @@ use crate::{
 	multilinear_product::TimeProductProver,
 	order_strategy::SignificantBitOrder,
 	streams::{Stream, StreamIterator},
+	interpolation::{field_mul_small::FieldMulSmall, LagrangePolynomial},
 };
-use crate::interpolation::multivariate::{Node, univariate_extrapolate_nodes, multivariate_extrapolate_nodes, multivariate_product_evaluations_nodes_with_axes};
+use crate::interpolation::multivariate::{compute_strides, multivariate_extrapolate_canonical, multivariate_product_evaluations_canonical};
 use crate::hypercube::Hypercube;
 use ark_ff::Field;
 use ark_std::vec::Vec;
 use std::collections::BTreeSet;
+
+// Evaluate a degree-≤D polynomial represented on U_D = [1,2,...,D, ∞] at an arbitrary point r.
+// `line` layout: [p(1), p(2), ..., p(D), s_inf].
+#[inline]
+fn eval_from_u_d_at_point<F: Field>(line: &[F], r: F) -> F {
+    let d = line.len().saturating_sub(1);
+    debug_assert!(d >= 1);
+    let s_inf = line[d];
+    let finite_values = &line[..d];
+    let mut finite_nodes: Vec<F> = Vec::with_capacity(d);
+    for i in 0..d { finite_nodes.push(F::from((i as u32) + 1)); }
+    LagrangePolynomial::<F, SignificantBitOrder>::evaluate_from_infty_and_points(
+        r,
+        s_inf,
+        &finite_nodes,
+        finite_values,
+    )
+}
 
 /// EvalProductProductProver is a placeholder for an evaluation-basis variant of the
 /// product prover. It mirrors the public interface of Blendy but defers core
@@ -38,7 +57,7 @@ pub struct StreamingEvalProductProver<F: Field, S: Stream<F>, const D: usize> {
 	pub reduced_shape: Vec<usize>,    // shape per axis (each D+1)
 }
 
-impl<F: Field, S: Stream<F>, const D: usize> StreamingEvalProductProver<F, S, D> {
+impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> StreamingEvalProductProver<F, S, D> {
 	pub fn is_initial_round(&self) -> bool {
 		self.current_round == 0
 	}
@@ -64,22 +83,6 @@ impl<F: Field, S: Stream<F>, const D: usize> StreamingEvalProductProver<F, S, D>
 		}
 	}
 
-	#[inline]
-	fn make_axis_nodes() -> Vec<Node<F>> {
-		let mut nodes: Vec<Node<F>> = Vec::with_capacity(D + 1);
-		for z in 1..=D { nodes.push(Node::Finite(F::from(z as u32))); }
-		nodes.push(Node::Infinity);
-		nodes
-	}
-
-	#[inline]
-	fn compute_strides(shape: &[usize]) -> Vec<usize> {
-		let v = shape.len();
-		let mut strides = vec![1usize; v];
-		for i in (0..v.saturating_sub(1)).rev() { strides[i] = strides[i + 1] * shape[i + 1]; }
-		strides
-	}
-
 	/// Collapse axis 0 by evaluating its A-nodes line at r (univariate extrapolation) and
 	/// replacing the grid with one fewer axis.
 	fn collapse_axis_at_point(&mut self, r: F) {
@@ -87,10 +90,8 @@ impl<F: Field, S: Stream<F>, const D: usize> StreamingEvalProductProver<F, S, D>
 		let grid = self.reduced_grid.as_ref().unwrap();
 		let shape = &self.reduced_shape;
 		if shape.is_empty() { return; }
-		let strides = Self::compute_strides(shape);
+		let strides = compute_strides(shape);
 		let axis_len = shape[0];
-		let x_nodes = Self::make_axis_nodes();
-		let y_nodes = [Node::Finite(r)];
 		// New shape excludes axis 0
 		let mut out_shape: Vec<usize> = Vec::with_capacity(shape.len().saturating_sub(1));
 		for i in 1..shape.len() { out_shape.push(shape[i]); }
@@ -109,8 +110,7 @@ impl<F: Field, S: Stream<F>, const D: usize> StreamingEvalProductProver<F, S, D>
 			// Gather line along axis 0
 			let mut line: Vec<F> = Vec::with_capacity(axis_len);
 			for t in 0..axis_len { line.push(grid[src_base + t * strides[0]]); }
-			let vals = univariate_extrapolate_nodes::<F>(&x_nodes, &line, &y_nodes);
-			out[out_idx] = vals[0];
+			out[out_idx] = eval_from_u_d_at_point::<F>(&line, r);
 		}
 		self.reduced_grid = Some(out);
 		self.reduced_shape = out_shape;
@@ -123,7 +123,7 @@ impl<F: Field, S: Stream<F>, const D: usize> StreamingEvalProductProver<F, S, D>
 		let grid = self.reduced_grid.as_ref().unwrap();
 		let shape = &self.reduced_shape;
 		if shape.is_empty() { return F::ZERO; }
-		let strides = Self::compute_strides(shape);
+		let strides = compute_strides(shape);
 		let total_rest = shape[1..].iter().copied().fold(1usize, |acc, s| acc * s);
 		let mut acc = F::ZERO;
 		for rest_idx in 0..total_rest {
@@ -141,7 +141,10 @@ impl<F: Field, S: Stream<F>, const D: usize> StreamingEvalProductProver<F, S, D>
 		acc
 	}
 
-	fn build_window_grid(&mut self, omega: usize) {
+	fn build_window_grid(&mut self, omega: usize)
+	where
+		F: FieldMulSmall,
+	{
 		// Derive dimensions
 		let j_prime = self.current_round + 1; // window starts at current round (1-indexed)
 		let x_num_vars = if j_prime == 0 { 0 } else { j_prime - 1 };
@@ -150,19 +153,15 @@ impl<F: Field, S: Stream<F>, const D: usize> StreamingEvalProductProver<F, S, D>
 		// Precompute Lagrange weights for prefix over x_num_vars
 		let mut lag_polys: Vec<F> = vec![F::ONE; 1usize << x_num_vars];
 		if x_num_vars > 0 {
-			let mut sequential_lag_poly = crate::interpolation::LagrangePolynomial::<F, SignificantBitOrder>::new(&self.verifier_messages);
+			let mut sequential_lag_poly = LagrangePolynomial::<F, SignificantBitOrder>::new(&self.verifier_messages);
 			for (x_index, _) in Hypercube::<SignificantBitOrder>::new(x_num_vars) {
 				lag_polys[x_index] = sequential_lag_poly.next().unwrap();
 			}
 		}
-		// Nodes for extrapolation
-		let axes_k: Vec<Vec<Node<F>>> = (0..omega).map(|_| vec![Node::Finite(F::ZERO), Node::Finite(F::ONE)]).collect();
-		let axis_d_nodes = Self::make_axis_nodes();
-		let axes_d: Vec<Vec<Node<F>>> = (0..omega).map(|_| axis_d_nodes.clone()).collect();
+		// No explicit node construction; will use canonical extrapolation
 		// Reset streams
 		self.stream_iterators.iter_mut().for_each(|it| it.reset());
-		// Output length per grid
-		let out_len = (D + 1).pow(omega as u32);
+		// Output length per grid computed later when needed
 		// Iterate over trailing b
 		for (_, _) in Hypercube::<SignificantBitOrder>::new(b_num_vars) {
 			// per-poly window slices on {0,1}^ω
@@ -178,13 +177,38 @@ impl<F: Field, S: Stream<F>, const D: usize> StreamingEvalProductProver<F, S, D>
 					}
 					window_vals_01[b_prime_index] = sum;
 				}
-				let window_vals_ad = multivariate_extrapolate_nodes::<F>(omega, &axes_k, &axes_d, &window_vals_01);
+				// Lift {0,1}^ω to U_1^ω by replacing along each axis: [0,1] -> [1, ∞] = [f(1), f(1)-f(0)]
+				let mut cur = window_vals_01.clone();
+				let shape: Vec<usize> = core::iter::repeat(2usize).take(omega).collect();
+				for axis in 0..omega {
+					let strides = compute_strides(&shape);
+					let mut next = vec![F::ZERO; cur.len()];
+					let mut num_slices = 1usize;
+					for (i, s) in shape.iter().enumerate() { if i != axis { num_slices *= *s; } }
+					for slice_idx in 0..num_slices {
+						let mut rem = slice_idx;
+						let mut base = 0usize;
+						for i in 0..omega {
+							if i == axis { continue; }
+							let si = shape[i];
+							let coord = rem % si;
+							rem /= si;
+							base += coord * strides[i];
+						}
+						let f0 = cur[base + 0 * strides[axis]];
+						let f1 = cur[base + 1 * strides[axis]];
+						next[base + 0 * strides[axis]] = f1;             // 1
+						next[base + 1 * strides[axis]] = f1 - f0;         // ∞
+					}
+					cur = next;
+				}
+				let window_vals_ad = multivariate_extrapolate_canonical::<F>(omega, 1, D, &cur);
 				polys_ad.push(window_vals_ad);
 			}
-			let prod = multivariate_product_evaluations_nodes_with_axes::<F>(omega, &polys_ad, &axes_d);
+			let prod = multivariate_product_evaluations_canonical::<F>(omega, &polys_ad, D);
 			// accumulate into reduced grid
 			let grid = self.reduced_grid.as_mut().expect("grid should be allocated");
-			for p in 0..out_len { grid[p] += prod[p]; }
+			for i in 0..grid.len() { grid[i] += prod[i]; }
 		}
 	}
 

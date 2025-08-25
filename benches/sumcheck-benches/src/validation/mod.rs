@@ -31,20 +31,21 @@ fn check_if_number(input_string: String) -> bool {
     }
 }
 
-fn validate_d_value_for_product_algorithms(algorithm_label: &AlgorithmLabel, d: usize) -> Result<(), String> {
+fn validate_d_value_for_product_algorithms(
+    algorithm_label: &AlgorithmLabel,
+    d: usize,
+) -> Result<(), String> {
     match algorithm_label {
-        AlgorithmLabel::ProductBlendy 
-        | AlgorithmLabel::ProductVSBW 
-        | AlgorithmLabel::ProductCTY 
-        | AlgorithmLabel::ProductImprovedTime => {
-            match d {
-                2 | 3 | 4 | 8 | 16 => Ok(()),
-                _ => Err(format!(
-                    "Unsupported d value: {}. Product algorithms only support d ∈ {{2, 3, 4, 8, 16}}",
-                    d
-                ))
-            }
-        }
+        AlgorithmLabel::ProductBlendy
+        | AlgorithmLabel::ProductVSBW
+        | AlgorithmLabel::ProductCTY
+        | AlgorithmLabel::ProductImprovedTime => match d {
+            2 | 3 | 4 | 8 | 16 => Ok(()),
+            _ => Err(format!(
+                "Unsupported d value: {}. Product algorithms only support d ∈ {{2, 3, 4, 8, 16}}",
+                d
+            )),
+        },
         _ => Ok(()), // Non-product algorithms don't use d parameter
     }
 }
@@ -67,7 +68,10 @@ pub fn validate_and_format_command_line_args(argsv: Vec<String>) -> BenchArgs {
         || argsv[1] == "ProductCTY"
         || argsv[1] == "ProductImprovedTime")
     {
-        eprintln!("Usage: {} field_label algorithm_label num_variables stage_size [d]", argsv[0]);
+        eprintln!(
+            "Usage: {} field_label algorithm_label num_variables stage_size [d]",
+            argsv[0]
+        );
         eprintln!("Invalid input: algorithm_label must be one of (CTY, VSBW, Blendy, ProductVSBW, ProductBlendy, ProductCTY, ProductImprovedTime)");
         std::process::exit(1);
     }
@@ -82,7 +86,10 @@ pub fn validate_and_format_command_line_args(argsv: Vec<String>) -> BenchArgs {
     };
     // field_label
     if !(argsv[2] == "Field64" || argsv[2] == "Field128" || argsv[2] == "FieldBn254") {
-        eprintln!("Usage: {} field_label algorithm_label num_variables stage_size [d]", argsv[0]);
+        eprintln!(
+            "Usage: {} field_label algorithm_label num_variables stage_size [d]",
+            argsv[0]
+        );
         eprintln!("Invalid input: field_label must be one of (Field64, Field128, FieldBn254)");
         std::process::exit(1);
     }
@@ -93,14 +100,20 @@ pub fn validate_and_format_command_line_args(argsv: Vec<String>) -> BenchArgs {
     };
     // num_variables
     if !check_if_number(argsv[3].clone()) {
-        eprintln!("Usage: {} field_label algorithm_label num_variables stage_size [d]", argsv[0]);
+        eprintln!(
+            "Usage: {} field_label algorithm_label num_variables stage_size [d]",
+            argsv[0]
+        );
         eprintln!("Invalid input: num_variables must be a number");
         std::process::exit(1);
     }
     let num_variables = argsv[3].clone().parse::<usize>().unwrap();
     // stage_size
     if !check_if_number(argsv[4].clone()) {
-        eprintln!("Usage: {} field_label algorithm_label num_variables stage_size [d]", argsv[0]);
+        eprintln!(
+            "Usage: {} field_label algorithm_label num_variables stage_size [d]",
+            argsv[0]
+        );
         eprintln!("Invalid input: stage_size must be a number");
         std::process::exit(1);
     }
@@ -115,13 +128,13 @@ pub fn validate_and_format_command_line_args(argsv: Vec<String>) -> BenchArgs {
     } else {
         2
     };
-    
+
     // Validate d value for Product algorithms
     if let Err(error_msg) = validate_d_value_for_product_algorithms(&algorithm_label, d) {
         eprintln!("Error: {}", error_msg);
         std::process::exit(1);
     }
-    
+
     return BenchArgs {
         field_label,
         algorithm_label,
