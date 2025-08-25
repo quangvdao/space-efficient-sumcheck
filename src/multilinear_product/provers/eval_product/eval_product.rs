@@ -5,7 +5,7 @@ use crate::{
 	streams::{Stream, StreamIterator},
 	interpolation::{field_mul_small::FieldMulSmall, LagrangePolynomial},
 };
-use crate::interpolation::multivariate::{compute_strides, multivariate_product_evaluations};
+use crate::interpolation::multivariate::{compute_strides, multi_product_eval_paper};
 use crate::hypercube::Hypercube;
 use ark_ff::Field;
 use ark_std::vec::Vec;
@@ -246,7 +246,7 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> StreamingEvalProduc
 				}
 				ml_inputs_01.push(window_vals_01);
 			}
-			let prod = multivariate_product_evaluations::<F>(omega, &ml_inputs_01, D);
+			let prod = multi_product_eval_paper::<F>(omega, &ml_inputs_01, D);
 			let grid = self.reduced_grid.as_mut().expect("grid should be allocated");
 			for i in 0..grid.len() { grid[i] += prod[i]; }
 		}
@@ -309,9 +309,10 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> StreamingEvalProduc
 			cur = next;
 			shape = next_shape;
 		}
-		// Now cur is a single line along axis 0 of length D+1 in U_D order [1..D, ∞]
-		for z in 1..D { out[z - 1] = cur[z - 1]; }
-		out[D - 1] = cur[D];
+		// Now cur is a single line along axis 0 of length D+1 in U_D order [∞, 0, 1, ..., D-1]
+		// Extract in sumcheck format: [f(1), f(2), ..., f(D-1), f(∞)]
+		for z in 1..D { out[z - 1] = cur[z]; }  // out[0] = cur[1] = f(1), out[1] = cur[2] = f(2), etc.
+		out[D - 1] = cur[0];  // out[D-1] = cur[0] = f(∞)
 		println!("DEBUG Streaming: compute_round out={:?}", out);
 		out
 	}
@@ -376,11 +377,14 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> StreamingEvalProduc
 			);
 			
 			self.stream_iterators.iter_mut().for_each(|it| it.reset());
-			let side = 1 << num_variables_new;
-			let mut evals: [Vec<F>; D] = std::array::from_fn(|_| vec![F::ZERO; side]);
+			
+			// Initialize VSBW prover to read from streams (not pre-computed evaluations)
 			for t in 0..D { 
-				self.vsbw_prover.evaluations[t] = Some(std::mem::take(&mut evals[t])); 
+				self.vsbw_prover.evaluations[t] = None; 
 			}
+			self.vsbw_prover.current_round = 0;
+			self.vsbw_prover.num_variables = num_variables_new;
+			self.vsbw_prover.streams = Some(self.streams.clone());
 		} else if self.switched_to_vsbw {
 			// Continue with VSBW
 			let verifier_message = self.verifier_messages.messages[self.current_round - 1];

@@ -54,6 +54,9 @@ pub fn compute_cross_product_schedule(params: &SchedulingParams) -> BTreeSet<usi
         }
     }
     
+    // Ensure hard stop is respected by removing any rounds that exceed it
+    set.retain(|&round| round <= hard_stop);
+    
     // Ensure we have at least one stage start
     if set.is_empty() { 
         set.insert(1); 

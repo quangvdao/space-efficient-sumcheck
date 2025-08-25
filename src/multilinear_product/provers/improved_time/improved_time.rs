@@ -8,7 +8,7 @@ use crate::interpolation::field_mul_small::FieldMulSmall;
 pub struct ImprovedTimeProductProver<F: Field, S: Stream<F>, const D: usize> {
     pub claim: F,
     pub current_round: usize,
-    pub evaluations: Option<Vec<[F; D]>>, // AoS: per index, values for all D streams
+    pub evaluations: Option<[Vec<F>; D]>, // SoA: per stream, all values
     pub streams: Option<[S; D]>,
     pub num_variables: usize,
 }
@@ -33,7 +33,7 @@ impl<'a, F: FieldMulSmall, S: Stream<F>, const D: usize> ImprovedTimeProductProv
 
         // Prefer tables if present (resilient when invoked mid-round), otherwise read from streams
         let (use_tables, evaluations_len) = match self.evaluations.as_ref() {
-            Some(table) => (true, table.len()),
+            Some(tables) => (true, tables[0].len()),
             None => {
                 let streams = self
                     .streams
@@ -47,10 +47,11 @@ impl<'a, F: FieldMulSmall, S: Stream<F>, const D: usize> ImprovedTimeProductProv
             let mut pairs: [(F, F); D] = [(F::ZERO, F::ZERO); D];
             let i1 = i | bitmask;
             if use_tables {
-                let table = self.evaluations.as_ref().unwrap();
-                let row0 = table[i];
-                let row1 = table[i1];
-                for j in 0..D { pairs[j] = (row0[j], row1[j]); }
+                let tables = self.evaluations.as_ref().unwrap();
+                // SoA access: each stream has its own contiguous array
+                for j in 0..D {
+                    pairs[j] = (tables[j][i], tables[j][i1]);
+                }
             } else {
                 let streams = self.streams.as_ref().unwrap();
                 for j in 0..D {
@@ -68,42 +69,43 @@ impl<'a, F: FieldMulSmall, S: Stream<F>, const D: usize> ImprovedTimeProductProv
         // Calculate constants for this reduction
         let setbit: usize = 1 << self.num_free_variables();
 
-        if let Some(mut prev) = self.evaluations.take() {
-            // In-place reduction across all streams with AoS layout
-            let evaluations_len = prev.len() / 2;
-            for i0 in 0..evaluations_len {
-                let i1 = i0 | setbit;
-                let row0 = prev[i0];
-                let row1 = prev[i1];
-                let mut out_row: [F; D] = [F::ZERO; D];
-                for j in 0..D {
-                    let e0 = row0[j];
-                    let e1 = row1[j];
+        if let Some(mut prev_tables) = self.evaluations.take() {
+            // In-place reduction across all streams with SoA layout
+            let evaluations_len = prev_tables[0].len() / 2;
+            for j in 0..D {
+                let table = &mut prev_tables[j];
+                for i0 in 0..evaluations_len {
+                    let i1 = i0 | setbit;
+                    let e0 = table[i0];
+                    let e1 = table[i1];
                     let diff = e1 - e0;
-                    out_row[j] = e0 + diff * verifier_message;
+                    table[i0] = e0 + diff * verifier_message;
                 }
-                prev[i0] = out_row;
+                table.truncate(evaluations_len);
             }
-            prev.truncate(evaluations_len);
-            self.evaluations = Some(prev);
+            self.evaluations = Some(prev_tables);
         } else {
-            // First reduction: build from streams directly into AoS layout
+            // First reduction: build from streams directly into SoA layout
             let evaluations_len = 1usize << self.num_free_variables();
             let streams = self
                 .streams
                 .as_ref()
                 .expect("Both streams and evaluations cannot be None");
-            let mut out: Vec<[F; D]> = vec![[F::ZERO; D]; evaluations_len];
-            for i0 in 0..evaluations_len {
-                let i1 = i0 | setbit;
-                for j in 0..D {
+            
+            // Initialize SoA structure: D separate vectors
+            let mut out_tables: [Vec<F>; D] = core::array::from_fn(|_| vec![F::ZERO; evaluations_len]);
+            
+            for j in 0..D {
+                let table = &mut out_tables[j];
+                for i0 in 0..evaluations_len {
+                    let i1 = i0 | setbit;
                     let e0 = streams[j].evaluation(i0);
                     let e1 = streams[j].evaluation(i1);
                     let diff = e1 - e0;
-                    out[i0][j] = e0 + diff * verifier_message;
+                    table[i0] = e0 + diff * verifier_message;
                 }
             }
-            self.evaluations = Some(out);
+            self.evaluations = Some(out_tables);
         }
     }
 }

@@ -4,7 +4,11 @@ use ark_ff::{
 };
 use std::env;
 
-use space_efficient_sumcheck::{interpolation::LagrangePolynomial, messages::VerifierMessages};
+use space_efficient_sumcheck::{
+    interpolation::LagrangePolynomial, 
+    messages::VerifierMessages,
+    order_strategy::GraycodeOrder,
+};
 
 #[derive(MontConfig)]
 #[modulus = "143244528689204659050391023439224324689"] // q = 143244528689204659050391023439224324689
@@ -23,8 +27,8 @@ fn random_field_elements<F: Field>(n: usize) -> Vec<F> {
 fn main() {
     let argsv: Vec<String> = env::args().collect();
     let num_vars = argsv[1].parse::<usize>().unwrap();
-    let mut lag_poly = LagrangePolynomial::new(VerifierMessages::new(&random_field_elements::<
-        Field128,
-    >(num_vars)));
+    let random_elements = random_field_elements::<Field128>(num_vars);
+    let verifier_messages = VerifierMessages::new(&random_elements);
+    let mut lag_poly = LagrangePolynomial::<Field128, GraycodeOrder>::new(&verifier_messages);
     while let Some(_element) = lag_poly.next() {}
 }

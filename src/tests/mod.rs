@@ -11,3 +11,7 @@ pub mod window_schedule_audit;
 pub mod schedule_comparison;
 pub mod blendy_correctness;
 pub mod hard_stop_test;
+pub mod debug_eval_product;
+pub mod large_d_scheduling;
+pub mod debug_schedule;
+pub mod debug_multivariate;
