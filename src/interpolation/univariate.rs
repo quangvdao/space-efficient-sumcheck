@@ -24,7 +24,28 @@ fn pow_usize<F: Field>(base: F, mut exp: usize) -> F {
 }
 
 // -----------------------------------------------------------------------------
-// Improved univariate extrapolation/evaluation (ported from high-d-opt)
+// Product of D linear polynomials via recursive evaluation-based approach
+// -----------------------------------------------------------------------------
+// The `eval_inter*` functions implement a recursive, evaluation-based algorithm for
+// computing the product of D linear polynomials, as described in `sections/4_high_d.tex`.
+// The core idea is to avoid expensive coefficient-form arithmetic by staying in the
+// evaluation domain.
+//
+// The algorithm uses a divide-and-conquer strategy:
+// 1. Split the D polynomials into two halves of size D/2.
+// 2. Recursively compute the product of each half. This results in two degree-D/2 polynomials,
+//    represented by their evaluations on a grid suitable for that degree (e.g., U_{D/2}).
+// 3. Extrapolate the evaluations of these two polynomials to a common, larger grid (U_D).
+// 4. Multiply the evaluations point-wise to get the final result.
+//
+// The functions below are heavily optimized, hardcoded versions of this recursion for small,
+// power-of-two values of D (2, 4, 8, 16, 32). They implicitly use the highly optimized
+// extrapolation logic from the `extend*` functions.
+//
+// - `_final` variants: Optimized for the last round of a protocol window, omitting one
+//   evaluation point that is not needed for the prover's message.
+// - `_accumulate` variants: Fused versions for streaming provers that add results directly
+//   into an existing accumulator to avoid heap allocations.
 // -----------------------------------------------------------------------------
 
 // d = 2: [0, 1] -> [1, 2, inf]
@@ -309,7 +330,8 @@ fn eval_inter16_final_accumulate<F: FieldMulSmall>(p: &[(F, F); 16], sums: &mut 
     let b = eval_inter8(p[8..16].try_into().unwrap());
     let av = batch_values(&a);
     let bv = batch_values(&b);
-    for i in 0..15 { sums[i] += av[i] * bv[i]; }
+    // Include all entries [1..15, inf]
+    for i in 0..16 { sums[i] += av[i] * bv[i]; }
 }
 
 // d = 32: [1, 2, ..., 16, inf] -> [1, 2, ..., 32, inf]
@@ -423,13 +445,28 @@ fn eval_inter32_final_accumulate<F: FieldMulSmall>(p: &[(F, F); 32], sums: &mut 
     let b = eval_inter16(p[16..32].try_into().unwrap());
     let av = batch_values(&a);
     let bv = batch_values(&b);
-    for i in 0..31 { sums[i] += av[i] * bv[i]; }
+    // Include all entries [1..31, inf]
+    for i in 0..32 { sums[i] += av[i] * bv[i]; }
 }
 
 // -----------------------------------------------------------------------------
 // Canonical univariate extrapolation: U_k = [1..k, ∞] → U_h = [1..h, ∞]
 // Doubling steps use the same small-int recurrences as eval_inter{8,16,32} helpers.
 // Tail is handled by extending to next power-of-two and truncating (keeps f(∞)).
+// -----------------------------------------------------------------------------
+// The `extend*` functions implement the core of the optimized univariate extrapolation
+// from `sections/D_high_d_appendix.tex`. The goal is to extend a polynomial's evaluations
+// from a smaller domain U_k = {1, ..., k, ∞} to a larger domain U_h.
+//
+// The key insight is that computing an extrapolated value p(k+c) can be reformulated
+// as evaluating a "shifted" polynomial q_c(x) = p(x+c) at the point k. The evaluations
+// of q_c on its natural domain {1, ..., k, ∞} can be derived from the already-known
+// evaluations of p on {c+1, ..., c+k, ∞}.
+//
+// This allows for an efficient, incremental computation of new evaluation points,
+// where each new point p(k+c) is computed using a sliding window of the c previous points.
+// The hardcoded formulas below are pre-derived, optimized implementations of this
+// principle, using minimal multi-addition chains to reduce the total number of operations.
 // -----------------------------------------------------------------------------
 
 #[inline]
@@ -512,6 +549,17 @@ fn extend16_to_32<F: FieldMulSmall>(vals: &[F; 17]) -> [F; 33] {
     f
 }
 
+/// Extrapolates evaluations of a degree-k polynomial on the domain U_k = {1, ..., k, ∞}
+/// to the larger domain U_h = {1, ..., h, ∞}.
+///
+/// This function implements an efficient extrapolation strategy by climbing a "power-of-two
+/// ladder". It repeatedly calls the optimized `extend{k}_to_{2k}` routines, which are
+/// hardcoded for performance, until the evaluation domain is large enough. If the target
+/// degree `h` is not a power of two, the result is truncated to the correct size.
+///
+/// This approach is significantly more efficient than generic interpolation methods (like
+/// solving a Vandermonde system or using barycentric formulas) for the specific domains
+/// used in this library.
 pub fn extrapolate_uk_to_uh<F: FieldMulSmall>(values_uk: &[F], h: usize) -> Vec<F> {
     let mut k = values_uk.len() - 1;
     assert!(k >= 1 && k <= 16, "supported k in [1,2,4,8,16]");

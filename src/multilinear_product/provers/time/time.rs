@@ -41,8 +41,8 @@ impl<'a, F: Field, S: Stream<F>, const D: usize> TimeProductProver<F, S, D> {
 
         // Iterate through evaluations
         for i in 0..(evaluations_len / 2) {
-            let mut prod_g1: F = F::ONE;       // product at x = 1
-            let mut prod_leading: F = F::ONE;  // product at ∞ (top coeffs)
+            let mut prod_g1: F = F::ONE; // product at x = 1
+            let mut prod_leading: F = F::ONE; // product at ∞ (top coeffs)
             let mut prod_extras_arr: [F; 30] = [F::ONE; 30]; // supports up to D=32
 
             for j in 0..D {
@@ -60,6 +60,13 @@ impl<'a, F: Field, S: Stream<F>, const D: usize> TimeProductProver<F, S, D> {
                     },
                     Some(evals) => evals[i | bitmask],
                 };
+                
+                // Debug tiny cases
+                if self.num_free_variables() <= 2 && i < 2 && j < 1 {
+                    println!("DEBUG TimeProver: i={}, j={}, pos0={}, pos1={}, v0={:?}, v1={:?}", 
+                        i, j, i, i | bitmask, v0, v1);
+                }
+                
                 // values at 1 and ∞
                 let diff = v1 - v0;
                 prod_leading *= diff; // ∞

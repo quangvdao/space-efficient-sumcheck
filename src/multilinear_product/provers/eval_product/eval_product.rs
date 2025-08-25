@@ -39,10 +39,22 @@ fn sum_bool_from_u_d_line<F: Field>(line: &[F]) -> F {
     f0 + f1
 }
 
-/// EvalProductProductProver is a placeholder for an evaluation-basis variant of the
-/// product prover. It mirrors the public interface of Blendy but defers core
-/// logic to future work. For now it routes phase-3 to the existing time prover
-/// and stubs phase-1/2 computations.
+/// Implements the evaluation-basis sum-check prover described in `sections/5_small_value_streaming.tex`
+/// (Figure `fig:small-value-streaming`, `EvalProduct`).
+///
+/// This prover uses a **round-batching** or **windowing** strategy. Instead of streaming the
+/// input polynomials for each round, it performs a single, expensive pass to compute a "window
+/// polynomial" `q_t` that is sufficient to answer challenges for a whole window of `ω_t`
+/// rounds. This material is stored in an evaluation grid (`reduced_grid`).
+///
+/// The protocol proceeds in phases, managed by a `window_schedule`:
+/// 1.  **Window Computation**: At the start of a window (pass), `build_window_grid` is called.
+///     It computes `q_t` by summing out non-window variables and stores its evaluations on U_D^ω.
+/// 2.  **Round Computation**: For each round within the window, the prover uses the in-memory grid
+///     to compute the round polynomial (`compute_round`) and bind challenges (`collapse_axis_at_point`),
+///     which is equivalent to running `LinearTime_SC` on `q_t`.
+/// 3.  **Final Phase**: For the last few rounds, it can switch to a standard `TimeProductProver`
+///     to avoid the overhead of windowing on small inputs.
 pub struct StreamingEvalProductProver<F: Field, S: Stream<F>, const D: usize> {
 	pub claim: F,
 	pub current_round: usize,
@@ -93,8 +105,14 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> StreamingEvalProduc
 		}
 	}
 
-	/// Collapse axis 0 by evaluating its A-nodes line at r (univariate extrapolation) and
-	/// replacing the grid with one fewer axis.
+	/// Binds the first variable of the window polynomial `q_t` to the verifier's challenge `r`.
+	/// This corresponds to the update step of `LinearTime_SC` applied to the window polynomial.
+	///
+	/// It operates on the `reduced_grid` by taking each (v-1)-dimensional slice and reducing
+	/// it to a (v-1)-dimensional point. This is done by gathering the evaluations along the
+	/// first axis into a line and finding the value of the corresponding univariate polynomial
+	/// at `r` using `eval_from_u_d_at_point`. The result is a new, smaller grid with one
+	/// fewer dimension, ready for the next round's computation.
 	fn collapse_axis_at_point(&mut self, r: F) {
 		if self.reduced_grid.is_none() { return; }
 		let grid = self.reduced_grid.as_ref().unwrap();
@@ -151,61 +169,36 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> StreamingEvalProduc
 		acc
 	}
 
+	/// Corresponds to step 1(a) in Figure `fig:small-value-streaming`.
+	///
+	/// This function computes the evaluations of the window polynomial `q_t` on the grid U_D^ω.
+	/// The paper defines `q_t` as:
+	///   `q_t(X_1..X_ω) = Σ_{x'} Π_{k=1..d} p_k(r_{<S_t}, X_1..X_ω, x')`
+	///
+	/// This implementation breaks the computation into several parts:
+	/// 1.  **Variable Splitting**: It partitions the `num_variables` into three sets:
+	///     - `x_num_vars`: Variables already bound to challenges `r_{<S_t}`.
+	///     - `omega`: The `ω` variables of the current window (X_1..X_ω).
+	///     - `b_num_vars`: The trailing variables `x'` that must be summed out.
+	/// 2.  **Lagrange Weights**: It computes `weights_by_x`, the Lagrange coefficients for the
+	///     bound variables, to efficiently evaluate `p_k(r_{<S_t}, ...)` from the initial streams.
+	/// 3.  **Summation and Product**: It iterates through all assignments to the trailing `b_num_vars` (`x'`).
+	///     In each iteration, it:
+	///     a. Computes the evaluations of each `p_k(r_{<S_t}, B', b)` for all `B' ∈ {0,1}^ω`.
+	///        This yields `ml_inputs_01`, `d` multilinear polynomials in `ω` variables (each on {0,1}^ω).
+	///     b. Calls `multivariate_product_evaluations` (the `MultiProductEval` routine) to compute
+	///        the product `Π p_k` on the extended grid U_D^ω.
+	///     c. Accumulates this result into `self.reduced_grid`, performing the outer `Σ_{x'}`.
+	///
+	/// A fast path for `omega = 1` is included as a performance optimization, as the general
+	/// multivariate machinery is not needed for a univariate window polynomial.
 	fn build_window_grid(&mut self, omega: usize)
 	where
 		F: FieldMulSmall,
 	{
-		// Fast path: omega == 1 can be computed directly in the univariate domain
-		if omega == 1 {
-			let n = self.num_variables;
-			let bitmask: usize = 1 << (n - 1); // split on the current round (MSB)
-			let half = 1usize << (n - 1);
-			let mut sums: Vec<F> = vec![F::ZERO; if D > 1 { D } else { 1 }];
-			for i in 0..half {
-				let mut prod_g1: F = F::ONE;
-				let mut prod_leading: F = F::ONE;
-				let mut prod_extras: [F; 30] = [F::ONE; 30];
-				let num_extras = if D > 2 { D - 2 } else { 0 };
-				for j in 0..D {
-					let v0 = self.streams[j].evaluation(i);
-					let v1 = self.streams[j].evaluation(i | bitmask);
-					let diff = v1 - v0;
-					prod_leading *= diff;
-					prod_g1 *= v1;
-					if num_extras > 0 {
-						let mut val = v1 + diff; // g(2)
-						prod_extras[0] *= val;
-						for k in 1..num_extras {
-							val += diff; // advance to g(3), g(4), ...
-							prod_extras[k] *= val;
-						}
-					}
-				}
-				if D == 1 {
-					sums[0] += prod_g1;
-				} else {
-					sums[0] += prod_g1; // g(1)
-					for k in 0..num_extras { sums[1 + k] += prod_extras[k]; }
-					sums[D - 1] += prod_leading; // ∞
-				}
-			}
-			// Materialize a single-axis grid line on U_D: [1, 2, ..., D-1, D=?, ∞]
-			self.reduced_shape = vec![D + 1];
-			let mut line: Vec<F> = vec![F::ZERO; D + 1];
-			if D == 1 {
-				line[0] = sums[0];
-			} else {
-				for z in 1..D { line[z - 1] = sums[z - 1]; }
-				line[D] = sums[D - 1]; // ∞
-			}
-			self.reduced_grid = Some(line);
-			return;
-		}
-
 		// Derive dimensions
-		let j_prime = self.current_round + 1; // window starts at current round (1-indexed)
-		let x_num_vars = if j_prime == 0 { 0 } else { j_prime - 1 };
-		let b_num_vars = self.num_variables + 1 - j_prime - omega;
+		let x_num_vars = self.current_round; // window starts at current round (1-indexed)
+		let b_num_vars = self.num_variables - x_num_vars - omega;
 		assert!(b_num_vars as isize >= 0, "invalid window dims");
 		// Precompute Lagrange weights for prefix x over all 2^{x} assignments, keyed by lex index
 		let mut weights_by_x: Vec<F> = vec![F::ONE; 1usize << x_num_vars];
@@ -230,7 +223,7 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> StreamingEvalProduc
 		// For each trailing b assignment, build per-poly window slices on {0,1}^{omega} and accumulate product on U_D^{omega}
 		let num_b = 1usize << b_num_vars;
 		for b_index in 0..num_b {
-			let mut polys_01: Vec<Vec<F>> = Vec::with_capacity(D);
+			let mut ml_inputs_01: Vec<Vec<F>> = Vec::with_capacity(D);
 			for j in 0..D {
 				let mut window_vals_01: Vec<F> = vec![F::ZERO; 1usize << omega];
 				for b_prime_index in 0..(1usize << omega) {
@@ -252,15 +245,26 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> StreamingEvalProduc
 					}
 					window_vals_01[b_prime_index] = acc;
 				}
-				polys_01.push(window_vals_01);
+				ml_inputs_01.push(window_vals_01);
 			}
-			let prod = multivariate_product_evaluations::<F>(omega, &polys_01, D);
+			let prod = multivariate_product_evaluations::<F>(omega, &ml_inputs_01, D);
 			let grid = self.reduced_grid.as_mut().expect("grid should be allocated");
 			for i in 0..grid.len() { grid[i] += prod[i]; }
 		}
 	}
 
-	/// Round computation: use reduced_grid to produce [g(1), g(2), ..., g(D-1), g(∞)].
+	/// Computes the prover's message for the current round from the precomputed window grid.
+	/// This corresponds to one step of running `LinearTime_SC` on the window polynomial `q_t`.
+	///
+	/// For a round corresponding to window variable `X_j`, the prover must compute:
+	///   `s_j(X_j) = Σ_{x'' ∈ {0,1}^{ω-j}} q_t(r_1, ..., r_{j-1}, X_j, x'')`
+	///
+	/// This is achieved by taking the current `reduced_grid` (which has `ω-(j-1)` dimensions)
+	/// and summing out all dimensions except for the first one (which corresponds to `X_j`).
+	/// The summation over the Boolean hypercube is performed by `sum_bool_from_u_d_line`,
+	/// which evaluates a univariate polynomial at 0 and 1 and adds the results. This is
+	/// repeated for each remaining axis until only a single line of evaluations for `s_j`
+	/// remains.
 	pub fn compute_round(&mut self) -> Vec<F> {
 		if self.switched_to_vsbw {
 			return self.vsbw_prover.vsbw_evaluate();
@@ -309,11 +313,40 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> StreamingEvalProduc
 		// Now cur is a single line along axis 0 of length D+1 in U_D order [1..D, ∞]
 		for z in 1..D { out[z - 1] = cur[z - 1]; }
 		out[D - 1] = cur[D];
+		println!("DEBUG Streaming: compute_round out={:?}", out);
 		out
 	}
 
-	/// Stage/window management: initialize grid at window start; collapse after binding.
+	/// The main state machine for the prover, called once per round.
+	///
+	/// This function implements the top-level loop ("For t=1..T") from Figure `fig:small-value-streaming`.
+	/// It manages the windowing lifecycle:
+	///
+	/// 1.  **Switch to Final Prover**: First, it checks if the protocol has reached the final rounds.
+	///     If so, it switches to the more efficient `vsbw_prover` (`TimeProductProver`), which
+	///     implements the classic `LinearTime_SC`.
+	///
+	/// 2.  **Start of a New Window**: If no `reduced_grid` exists, it means a new pass/window must
+	///     begin. It allocates a zero-initialized grid of shape (D+1)^ω and calls `build_window_grid`
+	///     to populate it. This is the most expensive part of the protocol.
+	///
+	/// 3.  **Inside an Active Window**: If a `reduced_grid` exists, it means we are in the middle of a
+	///     window. The function calls `collapse_axis_at_point` to bind the first axis of the grid
+	///     to the verifier's challenge from the previous round. This corresponds to the update step
+	///     of `LinearTime_SC` on the window polynomial `q_t`.
+	///
+	/// 4.  **End of a Window**: If `collapse_axis_at_point` collapses the last dimension of the grid,
+	///     the grid is cleared. This signals that the window is complete, and a new one will be
+	///     built on the next call.
 	pub fn compute_state(&mut self) {
+		println!(
+			"DEBUG Streaming: compute_state round={}, switched_to_vsbw={}, reduced_grid_none={}, current_window_idx={}, windows={:?}",
+			self.current_round,
+			self.switched_to_vsbw,
+			self.reduced_grid.is_none(),
+			self.current_window_idx,
+			self.windows
+		);
 		// Tail switch behavior maintained
 		let j = self.current_round + 1;
 		let p = self.state_comp_set.contains(&j);
@@ -338,6 +371,7 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> StreamingEvalProduc
 			// Start of a new window: allocate zero grid with shape (D+1)^ω and populate from streams
 			if self.current_window_idx < self.windows.len() {
 				let omega = self.windows[self.current_window_idx];
+				if self.num_variables <= 4 { println!("DEBUG Streaming: new window ω={}, windows={:?}", omega, self.windows); }
 				self.reduced_shape = core::iter::repeat(D + 1).take(omega).collect();
 				let total = self.reduced_shape.iter().copied().fold(1usize, |acc, s| acc * s);
 				self.reduced_grid = Some(vec![F::ZERO; total]);
@@ -347,12 +381,19 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> StreamingEvalProduc
 				// No more windows; remain in per-round streaming (not yet implemented)
 			}
 		} else {
-			// Collapse axis 0 with the last challenge r to advance within the window
-			if self.current_round > 0 && self.window_offset < self.reduced_shape.len() {
-				let r = self.verifier_messages.messages[self.current_round - 1];
-				self.collapse_axis_at_point(r);
-				// If finished window, move to next window
-				if self.reduced_shape.is_empty() {
+			// Advance within the window only if at least two axes remain (so compute_round still sees a line)
+			if self.current_round > 0 {
+				if self.reduced_shape.len() > 1 && self.window_offset < self.reduced_shape.len() {
+					let r = self.verifier_messages.messages[self.current_round - 1];
+					self.collapse_axis_at_point(r);
+					// If finished window, move to next window
+					if self.reduced_shape.is_empty() {
+						self.reduced_grid = None;
+						self.current_window_idx += 1;
+						self.window_offset = 0;
+					}
+				} else if self.reduced_shape.len() <= 1 {
+					// No collapses to perform for ω=1; end this window and rebuild next round
 					self.reduced_grid = None;
 					self.current_window_idx += 1;
 					self.window_offset = 0;

@@ -89,7 +89,11 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> Prover<F>
 				j_prime += omega_space;
 			}
 		}
-
+		// Fallback: ensure at least one window exists to trigger grid construction
+		if windows.is_empty() {
+			windows.push(1);
+		}
+		
 		Self {
 			claim: prover_config.claim,
 			current_round: 0,
@@ -135,6 +139,7 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> Prover<F>
 		self.init_round_vars();
 		self.compute_state();
 		let sums: Vec<F> = self.compute_round();
+		println!("DEBUG Streaming: next_message round={}, sums={:?}", self.current_round, sums);
 
 		self.current_round += 1;
 		if self.switched_to_vsbw {
