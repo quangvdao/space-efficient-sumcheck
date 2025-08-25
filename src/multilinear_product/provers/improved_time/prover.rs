@@ -57,12 +57,12 @@ impl<F: FieldMulSmall, S: Stream<F>, const D: usize> Prover<F> for ImprovedTimeP
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::{multilinear_product::consistency_test, BenchStream, FBN254};
+    use crate::tests::{multilinear_product::consistency_test, BenchStream, BN254};
 
     use super::ImprovedTimeProductProver;
 
     #[test]
     fn parity_with_basic_prover() {
-        consistency_test::<FBN254, BenchStream<FBN254>, ImprovedTimeProductProver<FBN254, BenchStream<FBN254>, 2>, 2>();
+        consistency_test::<BN254, BenchStream<BN254>, ImprovedTimeProductProver<BN254, BenchStream<BN254>, 2>, 2>();
     }
 }

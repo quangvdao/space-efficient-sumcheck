@@ -1,5 +1,5 @@
 use ark_ff::Field;
-use crate::interpolation::univariate::extrapolate_uk_to_uh_canonical;
+use crate::interpolation::univariate::extrapolate_uk_to_uh;
 use crate::interpolation::field_mul_small::FieldMulSmall;
 
 /// Compute row-major strides for a given `shape` (last axis contiguous).
@@ -46,7 +46,7 @@ pub trait UniExtrap<F: Field> {
 ///
 /// Cost: identical structure to the finite-nodes variant. Extrapolation introduces no big-by-big
 /// multiplications; all big-by-big work arises later in pointwise products (see product eval).
-pub fn multivariate_extrapolate_canonical<F: FieldMulSmall>(
+pub fn multivariate_extrapolate<F: FieldMulSmall>(
     v: usize,
     k: usize,
     h: usize,
@@ -83,7 +83,7 @@ pub fn multivariate_extrapolate_canonical<F: FieldMulSmall>(
             }
             let mut line: Vec<F> = Vec::with_capacity(src_axis_len);
             for t in 0..src_axis_len { line.push(cur[src_base + t * strides_src[axis]]); }
-            let line_ex = extrapolate_uk_to_uh_canonical::<F>(&line, h);
+            let line_ex = extrapolate_uk_to_uh::<F>(&line, h);
             for t in 0..dst_axis_len { next[dst_base + t * strides_dst[axis]] = line_ex[t]; }
         }
         cur = next;
@@ -124,7 +124,7 @@ fn lift_01_to_u1_grid<F: Field>(v: usize, values_01: &[F]) -> Vec<F> {
 
 /// Canonical multivariate product: inputs are D polynomials on {0,1}^v; returns product on U_d^v
 /// using optimized univariate canonical extrapolation.
-pub fn multivariate_product_evaluations_canonical<F: FieldMulSmall>(
+pub fn multivariate_product_evaluations<F: FieldMulSmall>(
     v: usize,
     polys_01: &[Vec<F>],
     d: usize,
@@ -138,14 +138,14 @@ pub fn multivariate_product_evaluations_canonical<F: FieldMulSmall>(
     fn rec<F: FieldMulSmall>(v: usize, polys: &[Vec<F>], deg_parent: usize) -> Vec<F> {
         if polys.len() == 1 {
             let u1 = lift_01_to_u1_grid::<F>(v, &polys[0]);
-            return multivariate_extrapolate_canonical::<F>(v, 1, deg_parent, &u1);
+            return multivariate_extrapolate::<F>(v, 1, deg_parent, &u1);
         }
         let d_here = polys.len();
         let m = d_here / 2;
         let left = rec::<F>(v, &polys[..m], m);
         let right = rec::<F>(v, &polys[m..], d_here - m);
-        let left_ex = multivariate_extrapolate_canonical::<F>(v, m, deg_parent, &left);
-        let right_ex = multivariate_extrapolate_canonical::<F>(v, d_here - m, deg_parent, &right);
+        let left_ex = multivariate_extrapolate::<F>(v, m, deg_parent, &left);
+        let right_ex = multivariate_extrapolate::<F>(v, d_here - m, deg_parent, &right);
         let mut out = left_ex;
         for (o, r) in out.iter_mut().zip(right_ex.iter()) { *o *= *r; }
         out
@@ -156,7 +156,7 @@ pub fn multivariate_product_evaluations_canonical<F: FieldMulSmall>(
 
 /// Canonical multivariate product accumulate variant: adds product on U_d^v into `sums`.
 /// Precondition: sums.len() == (d+1)^v.
-pub fn multivariate_product_evaluations_canonical_accumulate<F: FieldMulSmall>(
+pub fn multivariate_product_evaluations_accumulate<F: FieldMulSmall>(
     v: usize,
     polys_01: &[Vec<F>],
     d: usize,
@@ -173,18 +173,18 @@ pub fn multivariate_product_evaluations_canonical_accumulate<F: FieldMulSmall>(
     fn rec_acc<F: FieldMulSmall>(v: usize, polys: &[Vec<F>], deg_parent: usize, sums: &mut [F]) {
         if polys.len() == 1 {
             let u1 = lift_01_to_u1_grid::<F>(v, &polys[0]);
-            let vals = multivariate_extrapolate_canonical::<F>(v, 1, deg_parent, &u1);
+            let vals = multivariate_extrapolate::<F>(v, 1, deg_parent, &u1);
             for (s, p) in sums.iter_mut().zip(vals.iter()) { *s += *p; }
             return;
         }
         let d_here = polys.len();
         let m = d_here / 2;
         // Compute left product on U_m^v and lift to U_{deg_parent}^v once
-        let left_prod_m = multivariate_product_evaluations_canonical::<F>(v, &polys[..m], m);
-        let left_ex = multivariate_extrapolate_canonical::<F>(v, m, deg_parent, &left_prod_m);
+        let left_prod_m = multivariate_product_evaluations::<F>(v, &polys[..m], m);
+        let left_ex = multivariate_extrapolate::<F>(v, m, deg_parent, &left_prod_m);
         // Compute right product on U_{d_here-m}^v and lift to U_{deg_parent}^v
-        let right_prod = multivariate_product_evaluations_canonical::<F>(v, &polys[m..], d_here - m);
-        let right_ex = multivariate_extrapolate_canonical::<F>(v, d_here - m, deg_parent, &right_prod);
+        let right_prod = multivariate_product_evaluations::<F>(v, &polys[m..], d_here - m);
+        let right_ex = multivariate_extrapolate::<F>(v, d_here - m, deg_parent, &right_prod);
         // Accumulate pointwise product into sums
         for i in 0..sums.len() { sums[i] += left_ex[i] * right_ex[i]; }
     }

@@ -1,9 +1,7 @@
 use ark_ff::Field;
 use ark_std::vec::Vec;
 use super::field_mul_small::FieldMulSmall;
-use crate::order_strategy::GraycodeOrder;
-use crate::interpolation::LagrangePolynomial;
-use super::multivariate::Node;
+// Node-based and Graycode/Lagrange paths removed; only canonical paths remain
 
 // Small helpers mirroring high-d-opt
 #[inline]
@@ -513,7 +511,7 @@ fn extend16_to_32<F: FieldMulSmall>(vals: &[F; 17]) -> [F; 33] {
     f
 }
 
-pub fn extrapolate_uk_to_uh_canonical<F: FieldMulSmall>(values_uk: &[F], h: usize) -> Vec<F> {
+pub fn extrapolate_uk_to_uh<F: FieldMulSmall>(values_uk: &[F], h: usize) -> Vec<F> {
     let mut k = values_uk.len() - 1;
     assert!(k >= 1 && k <= 16, "supported k in [1,2,4,8,16]");
     assert!(h >= k && h <= 32, "supported h up to 32");
@@ -930,114 +928,6 @@ pub fn univariate_extrapolate<F: Field>(
             den += li;
         }
         out.push(num * den.inverse().expect("nonzero denominator"));
-    }
-    out
-}
-
-/// Compute s(∞) (leading coefficient) from finite nodes and values using Lagrange weights.
-fn compute_leading_coeff_from_finite<F: Field>(finite_nodes: &[F], finite_values: &[F]) -> F {
-    let k = finite_nodes.len();
-    assert!(k >= 1);
-    // weights w_i = 1 / ∏_{j≠i} (x_i - x_j)
-    let mut acc = F::from(0u32);
-    for i in 0..k {
-        let xi = finite_nodes[i];
-        let mut denom = F::from(1u32);
-        for j in 0..k {
-            if i == j { continue; }
-            denom *= xi - finite_nodes[j];
-        }
-        let wi = denom.inverse().expect("distinct nodes required");
-        acc += finite_values[i] * wi;
-    }
-    acc
-}
-
-/// Univariate extrapolation that supports node sets with infinity (as leading coefficient).
-/// Fast path: when x_nodes are [1..k, ∞] and y_nodes are [1..h, ∞], reuse shifted
-/// extrapolation from U_k to U_h via `extrapolate_from_u_k_to_u_n`.
-pub fn univariate_extrapolate_nodes<F: Field>(
-    x_nodes: &[Node<F>],
-    x_values: &[F],
-    y_nodes: &[Node<F>],
-) -> Vec<F> {
-    assert_eq!(x_nodes.len(), x_values.len());
-    // Separate finite nodes and optional s_inf source
-    let mut finite_nodes: Vec<F> = Vec::new();
-    let mut finite_values: Vec<F> = Vec::new();
-    let mut s_inf_src: Option<F> = None;
-    for (n, v) in x_nodes.iter().copied().zip(x_values.iter().copied()) {
-        match n {
-            Node::Finite(x) => { finite_nodes.push(x); finite_values.push(v); }
-            Node::Infinity => { s_inf_src = Some(v); }
-        }
-    }
-    let k_src = finite_nodes.len();
-    let has_inf_src = x_nodes.iter().any(|n| matches!(n, Node::Infinity));
-    let deg_src = if has_inf_src { k_src } else { k_src.saturating_sub(1) };
-    // If no s_inf provided, compute it from finite nodes
-    let s_inf = s_inf_src.unwrap_or_else(|| compute_leading_coeff_from_finite::<F>(&finite_nodes, &finite_values));
-
-    // Detect canonical 1-based nodes with Infinity at end for a fast path
-    let is_x_canonical = has_inf_src && finite_nodes.iter().enumerate().all(|(i, &x)| x == F::from((i as u32) + 1));
-    let mut y_len_finite = 0usize;
-    let mut y_is_canonical = true;
-    for (i, n) in y_nodes.iter().enumerate() {
-        match n {
-            Node::Finite(x) => {
-                y_len_finite += 1;
-                if *x != F::from((i as u32) + 1) { y_is_canonical = false; }
-            }
-            Node::Infinity => {
-                // Infinity must be last to be canonical
-                if i != y_nodes.len() - 1 { y_is_canonical = false; }
-            }
-        }
-    }
-
-    if is_x_canonical && y_is_canonical {
-        // Build compact U_k vector: [p(1),...,p(k), s_inf]
-        let mut values_u_k: Vec<F> = Vec::with_capacity(k_src + 1);
-        for v in finite_values.iter() { values_u_k.push(*v); }
-        values_u_k.push(s_inf);
-        // Extrapolate via unrolled Vandermonde-based method (fast path handled by eval_inter*_final elsewhere)
-        let out = extrapolate_from_u_k_to_u_n::<F>(&values_u_k, y_len_finite);
-        return out;
-    }
-
-    // Fallback: evaluate pointwise via Lagrange or barycentric
-    let eval_at = |r: F| -> F {
-        if has_inf_src {
-            match k_src {
-                0 => F::from(0u32),
-                1 => {
-                    let x0 = finite_nodes[0];
-                    let v0 = finite_values[0];
-                    s_inf * (r - x0) + v0
-                }
-                _ => LagrangePolynomial::<F, GraycodeOrder>::evaluate_from_infty_and_points(
-                    r,
-                    s_inf,
-                    &finite_nodes,
-                    &finite_values,
-                ),
-            }
-        } else {
-            // Pure barycentric from finite nodes only
-            univariate_extrapolate::<F>(&finite_nodes, &finite_values, core::slice::from_ref(&r))[0]
-        }
-    };
-    let mut out: Vec<F> = Vec::with_capacity(y_nodes.len());
-    let mut deg_tgt = 0usize;
-    for n in y_nodes.iter() { if let Node::Finite(_) = n { deg_tgt += 1; } }
-    for &y in y_nodes.iter() {
-        match y {
-            Node::Finite(r) => { out.push(eval_at(r)); }
-            Node::Infinity => {
-                let val = if deg_tgt > deg_src { F::from(0u32) } else { s_inf };
-                out.push(val);
-            }
-        }
     }
     out
 }

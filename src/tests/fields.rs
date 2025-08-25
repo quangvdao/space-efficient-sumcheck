@@ -19,4 +19,4 @@ pub struct F128Config;
 pub type F128 = Fp128<MontBackend<F128Config, 2>>;
 
 // Widely used pairing-friendly field (Barreto–Naehrig curve BN254)
-pub type FBN254 = ark_bn254::Fr;
+pub type BN254 = ark_bn254::Fr;

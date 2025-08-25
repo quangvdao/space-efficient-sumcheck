@@ -5,7 +5,7 @@ use crate::{
 	streams::{Stream, StreamIterator},
 	interpolation::{field_mul_small::FieldMulSmall, LagrangePolynomial},
 };
-use crate::interpolation::multivariate::{compute_strides, multivariate_extrapolate_canonical, multivariate_product_evaluations_canonical};
+use crate::interpolation::multivariate::{compute_strides, multivariate_extrapolate, multivariate_product_evaluations};
 use crate::hypercube::Hypercube;
 use ark_ff::Field;
 use ark_std::vec::Vec;
@@ -202,10 +202,10 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> StreamingEvalProduc
 					}
 					cur = next;
 				}
-				let window_vals_ad = multivariate_extrapolate_canonical::<F>(omega, 1, D, &cur);
+				let window_vals_ad = multivariate_extrapolate::<F>(omega, 1, D, &cur);
 				polys_ad.push(window_vals_ad);
 			}
-			let prod = multivariate_product_evaluations_canonical::<F>(omega, &polys_ad, D);
+			let prod = multivariate_product_evaluations::<F>(omega, &polys_ad, D);
 			// accumulate into reduced grid
 			let grid = self.reduced_grid.as_mut().expect("grid should be allocated");
 			for i in 0..grid.len() { grid[i] += prod[i]; }
