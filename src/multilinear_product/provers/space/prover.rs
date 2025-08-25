@@ -38,7 +38,7 @@ impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for SpaceProductProver<F,
         }
     }
 
-    fn next_message(&mut self, verifier_message: Self::VerifierMessage) -> Self::ProverMessage {
+    fn next_message(&mut self, verifier_message: Self::VerifierMessage, _claim_sum: F) -> Self::ProverMessage {
         // Ensure the current round is within bounds
         if self.current_round >= self.num_variables {
             return None;

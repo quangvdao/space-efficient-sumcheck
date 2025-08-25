@@ -7,5 +7,6 @@ pub use provers::{
     improved_time::{ImprovedTimeProductProver, ImprovedTimeProductProverConfig},
     space::{SpaceProductProver, SpaceProductProverConfig},
     time::{TimeProductProver, TimeProductProverConfig},
+    time_with_eq::{TimeProductProverWithEq, TimeEqProverConfig},
 };
 pub use sumcheck::ProductSumcheck;

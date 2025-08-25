@@ -32,7 +32,7 @@ impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for TimeProductProver<F, 
         }
     }
 
-    fn next_message(&mut self, verifier_message: Option<F>) -> Option<Vec<F>> {
+    fn next_message(&mut self, verifier_message: Option<F>, _claim_sum: F) -> Option<Vec<F>> {
         // Ensure the current round is within bounds
         if self.current_round >= self.total_rounds() {
             return None;

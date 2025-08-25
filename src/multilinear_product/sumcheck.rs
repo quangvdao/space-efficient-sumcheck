@@ -26,7 +26,7 @@ impl<F: Field, const D: usize> ProductSumcheck<F, D> {
         let mut verifier_message: Option<F> = None;
         // Track previous target sum for deriving g(1) and evaluating next targets
         let mut prev_target_sum: F = prover.claim();
-        while let Some(message) = prover.next_message(verifier_message) {
+        while let Some(message) = prover.next_message(verifier_message, prev_target_sum) {
             debug_assert!(message.len() == D, "expected exactly D={} message entries", D);
             // Blendy/StreamingEval scheme: [g(1), g(2), ..., g(D-1), g(∞)] for D>1; when D==1: [g(1)]
 

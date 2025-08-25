@@ -5,7 +5,7 @@ use crate::{
 	streams::{Stream, StreamIterator},
 	interpolation::{field_mul_small::FieldMulSmall, LagrangePolynomial},
 };
-use crate::interpolation::multivariate::{compute_strides, multivariate_extrapolate, multivariate_product_evaluations};
+use crate::interpolation::multivariate::{compute_strides, multivariate_product_evaluations};
 use crate::hypercube::Hypercube;
 use ark_ff::Field;
 use ark_std::vec::Vec;
@@ -27,6 +27,16 @@ fn eval_from_u_d_at_point<F: Field>(line: &[F], r: F) -> F {
         &finite_nodes,
         finite_values,
     )
+}
+
+// Compute f(0)+f(1) given a univariate degree-≤D polynomial specified by values on U_D = [1..D, ∞].
+// `line` layout: [f(1), f(2), ..., f(D), c_d] where c_d is the leading coefficient (value at ∞).
+#[inline]
+fn sum_bool_from_u_d_line<F: Field>(line: &[F]) -> F {
+    // Evaluate f at 0 and 1 from values on U_D and add
+    let f0 = eval_from_u_d_at_point::<F>(line, F::ZERO);
+    let f1 = eval_from_u_d_at_point::<F>(line, F::ONE);
+    f0 + f1
 }
 
 /// EvalProductProductProver is a placeholder for an evaluation-basis variant of the
@@ -145,68 +155,106 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> StreamingEvalProduc
 	where
 		F: FieldMulSmall,
 	{
+		// Fast path: omega == 1 can be computed directly in the univariate domain
+		if omega == 1 {
+			let n = self.num_variables;
+			let bitmask: usize = 1 << (n - 1); // split on the current round (MSB)
+			let half = 1usize << (n - 1);
+			let mut sums: Vec<F> = vec![F::ZERO; if D > 1 { D } else { 1 }];
+			for i in 0..half {
+				let mut prod_g1: F = F::ONE;
+				let mut prod_leading: F = F::ONE;
+				let mut prod_extras: [F; 30] = [F::ONE; 30];
+				let num_extras = if D > 2 { D - 2 } else { 0 };
+				for j in 0..D {
+					let v0 = self.streams[j].evaluation(i);
+					let v1 = self.streams[j].evaluation(i | bitmask);
+					let diff = v1 - v0;
+					prod_leading *= diff;
+					prod_g1 *= v1;
+					if num_extras > 0 {
+						let mut val = v1 + diff; // g(2)
+						prod_extras[0] *= val;
+						for k in 1..num_extras {
+							val += diff; // advance to g(3), g(4), ...
+							prod_extras[k] *= val;
+						}
+					}
+				}
+				if D == 1 {
+					sums[0] += prod_g1;
+				} else {
+					sums[0] += prod_g1; // g(1)
+					for k in 0..num_extras { sums[1 + k] += prod_extras[k]; }
+					sums[D - 1] += prod_leading; // ∞
+				}
+			}
+			// Materialize a single-axis grid line on U_D: [1, 2, ..., D-1, D=?, ∞]
+			self.reduced_shape = vec![D + 1];
+			let mut line: Vec<F> = vec![F::ZERO; D + 1];
+			if D == 1 {
+				line[0] = sums[0];
+			} else {
+				for z in 1..D { line[z - 1] = sums[z - 1]; }
+				line[D] = sums[D - 1]; // ∞
+			}
+			self.reduced_grid = Some(line);
+			return;
+		}
+
 		// Derive dimensions
 		let j_prime = self.current_round + 1; // window starts at current round (1-indexed)
 		let x_num_vars = if j_prime == 0 { 0 } else { j_prime - 1 };
 		let b_num_vars = self.num_variables + 1 - j_prime - omega;
 		assert!(b_num_vars as isize >= 0, "invalid window dims");
-		// Precompute Lagrange weights for prefix over x_num_vars
-		let mut lag_polys: Vec<F> = vec![F::ONE; 1usize << x_num_vars];
+		// Precompute Lagrange weights for prefix x over all 2^{x} assignments, keyed by lex index
+		let mut weights_by_x: Vec<F> = vec![F::ONE; 1usize << x_num_vars];
 		if x_num_vars > 0 {
 			let mut sequential_lag_poly = LagrangePolynomial::<F, SignificantBitOrder>::new(&self.verifier_messages);
-			for (x_index, _) in Hypercube::<SignificantBitOrder>::new(x_num_vars) {
-				lag_polys[x_index] = sequential_lag_poly.next().unwrap();
+			for (x_index_lex, _) in Hypercube::<SignificantBitOrder>::new(x_num_vars) {
+				weights_by_x[x_index_lex] = sequential_lag_poly.next().unwrap();
 			}
 		}
-		// No explicit node construction; will use canonical extrapolation
-		// Reset streams
-		self.stream_iterators.iter_mut().for_each(|it| it.reset());
-		// Output length per grid computed later when needed
-		// Iterate over trailing b
-		for (_, _) in Hypercube::<SignificantBitOrder>::new(b_num_vars) {
-			// per-poly window slices on {0,1}^ω
-			let mut polys_ad: Vec<Vec<F>> = Vec::with_capacity(D);
+
+		// Build inverse permutation from lex index -> position in SignificantBitOrder sequence
+		let total_points = 1usize << self.num_variables;
+		let mut pos_of_lex: Vec<usize> = vec![0usize; total_points];
+		{
+			let mut pos: usize = 0;
+			for (lex_idx, _) in Hypercube::<SignificantBitOrder>::new(self.num_variables) {
+				pos_of_lex[lex_idx] = pos;
+				pos += 1;
+			}
+		}
+
+		// For each trailing b assignment, build per-poly window slices on {0,1}^{omega} and accumulate product on U_D^{omega}
+		let num_b = 1usize << b_num_vars;
+		for b_index in 0..num_b {
+			let mut polys_01: Vec<Vec<F>> = Vec::with_capacity(D);
 			for j in 0..D {
 				let mut window_vals_01: Vec<F> = vec![F::ZERO; 1usize << omega];
-				for (b_prime_index, _) in Hypercube::<SignificantBitOrder>::new(omega) {
-					let mut sum = F::ZERO;
-					for (x_index, _) in Hypercube::<SignificantBitOrder>::new(x_num_vars) {
-						let w = lag_polys[x_index];
-						let v = self.stream_iterators[j].next().unwrap();
-						sum += w * v;
-					}
-					window_vals_01[b_prime_index] = sum;
-				}
-				// Lift {0,1}^ω to U_1^ω by replacing along each axis: [0,1] -> [1, ∞] = [f(1), f(1)-f(0)]
-				let mut cur = window_vals_01.clone();
-				let shape: Vec<usize> = core::iter::repeat(2usize).take(omega).collect();
-				for axis in 0..omega {
-					let strides = compute_strides(&shape);
-					let mut next = vec![F::ZERO; cur.len()];
-					let mut num_slices = 1usize;
-					for (i, s) in shape.iter().enumerate() { if i != axis { num_slices *= *s; } }
-					for slice_idx in 0..num_slices {
-						let mut rem = slice_idx;
-						let mut base = 0usize;
-						for i in 0..omega {
-							if i == axis { continue; }
-							let si = shape[i];
-							let coord = rem % si;
-							rem /= si;
-							base += coord * strides[i];
+				for b_prime_index in 0..(1usize << omega) {
+					let mut acc = F::ZERO;
+					if x_num_vars == 0 {
+						// lex_idx encodes [x | b' | b] with x empty
+						let lex_idx = (b_prime_index << b_num_vars) | b_index;
+						let pos = pos_of_lex[lex_idx];
+						let v = self.streams[j].evaluation(pos);
+						acc += v;
+					} else {
+						for x_index in 0..(1usize << x_num_vars) {
+							// Compose lex index: x in the most significant bits, then b', then b
+							let lex_idx = (x_index << (omega + b_num_vars)) | (b_prime_index << b_num_vars) | b_index;
+							let pos = pos_of_lex[lex_idx];
+							let v = self.streams[j].evaluation(pos);
+							acc += weights_by_x[x_index] * v;
 						}
-						let f0 = cur[base + 0 * strides[axis]];
-						let f1 = cur[base + 1 * strides[axis]];
-						next[base + 0 * strides[axis]] = f1;             // 1
-						next[base + 1 * strides[axis]] = f1 - f0;         // ∞
 					}
-					cur = next;
+					window_vals_01[b_prime_index] = acc;
 				}
-				let window_vals_ad = multivariate_extrapolate::<F>(omega, 1, D, &cur);
-				polys_ad.push(window_vals_ad);
+				polys_01.push(window_vals_01);
 			}
-			let prod = multivariate_product_evaluations::<F>(omega, &polys_ad, D);
-			// accumulate into reduced grid
+			let prod = multivariate_product_evaluations::<F>(omega, &polys_01, D);
 			let grid = self.reduced_grid.as_mut().expect("grid should be allocated");
 			for i in 0..grid.len() { grid[i] += prod[i]; }
 		}
@@ -223,12 +271,44 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> StreamingEvalProduc
 			return out;
 		}
 		let mut out = vec![F::ZERO; D];
-		for z in 1..D { // fill 1..D-1
-			let idx0 = z - 1;
-			out[z - 1] = self.sum_over_remaining_axes_at_axis0_index(idx0);
+		if self.reduced_grid.is_none() { return out; }
+		let grid = self.reduced_grid.as_ref().unwrap().clone();
+		let mut shape = self.reduced_shape.clone();
+		// Reduce axes 1.. to a single axis by summing over Booleans via mu-weights
+		let mut cur = grid;
+		// collapse axes one by one using Boolean-sum from U_D lines
+		// Iteratively collapse axis 1.. until only axis 0 remains
+		while shape.len() > 1 {
+			let axis = 1usize; // always collapse the next axis after 0
+			let strides = compute_strides(&shape);
+			let src_axis_len = shape[axis];
+			debug_assert_eq!(src_axis_len, D + 1);
+			let mut next_shape = shape.clone();
+			next_shape.remove(axis);
+			let total_next = next_shape.iter().copied().fold(1usize, |acc, s| acc * s);
+			let mut next = vec![F::ZERO; total_next];
+			for out_idx in 0..total_next {
+				// map out_idx to coords over remaining axes (including axis 0)
+				let mut rem = out_idx;
+				let mut src_base = 0usize;
+				for i in 0..shape.len() {
+					if i == axis { continue; }
+					let dim = if i < axis { next_shape[i] } else { next_shape[i - 1] };
+					let coord = rem % dim;
+					rem /= dim;
+					src_base += coord * strides[i];
+				}
+				// gather line along the collapsed axis and apply mu-sum
+				let mut line: Vec<F> = Vec::with_capacity(src_axis_len);
+				for t in 0..src_axis_len { line.push(cur[src_base + t * strides[axis]]); }
+				next[out_idx] = sum_bool_from_u_d_line::<F>(&line);
+			}
+			cur = next;
+			shape = next_shape;
 		}
-		// last slot: ∞
-		out[D - 1] = self.sum_over_remaining_axes_at_axis0_index(D);
+		// Now cur is a single line along axis 0 of length D+1 in U_D order [1..D, ∞]
+		for z in 1..D { out[z - 1] = cur[z - 1]; }
+		out[D - 1] = cur[D];
 		out
 	}
 

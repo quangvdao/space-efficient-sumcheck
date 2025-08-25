@@ -18,10 +18,11 @@ impl<F: Field> Sumcheck<F> {
         // Initialize vectors to store prover and verifier messages
         let mut prover_messages: Vec<(F, F)> = vec![];
         let mut verifier_messages: Vec<F> = vec![];
+        let claim_sum = prover.claim();
 
         // Run the protocol
         let mut verifier_message: Option<F> = None;
-        while let Some(message) = prover.next_message(verifier_message) {
+        while let Some(message) = prover.next_message(verifier_message, claim_sum) {
             // Handle how to proceed
             prover_messages.push(message);
             let r = F::rand(rng);

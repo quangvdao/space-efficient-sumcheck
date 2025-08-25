@@ -25,7 +25,7 @@ impl<F: Field, S: Stream<F>> Prover<F> for TimeProver<F, S> {
         }
     }
 
-    fn next_message(&mut self, verifier_message: Option<F>) -> Option<(F, F)> {
+    fn next_message(&mut self, verifier_message: Option<F>, _claim_sum: F) -> Option<(F, F)> {
         // Ensure the current round is within bounds
         if self.current_round >= self.total_rounds() {
             return None;

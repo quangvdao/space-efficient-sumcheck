@@ -3,3 +3,4 @@ pub mod eval_product;
 pub mod improved_time;
 pub mod space;
 pub mod time;
+pub mod time_with_eq;

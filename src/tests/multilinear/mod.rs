@@ -12,7 +12,7 @@ where
     S: Stream<F>,
     P: Prover<F, VerifierMessage = Option<F>, ProverMessage = Option<(F, F)>>,
 {
-    let round = p.next_message(message).unwrap();
+    let round = p.next_message(message, F::ZERO).unwrap();
     assert_eq!(round.0, eval_0, "g0 should evaluate correctly",);
     assert_eq!(round.1, eval_1, "g1 should evaluate correctly",);
 }

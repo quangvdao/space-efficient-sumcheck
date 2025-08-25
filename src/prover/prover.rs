@@ -15,5 +15,9 @@ pub trait Prover<F: Field> {
     type VerifierMessage;
     fn claim(&self) -> F;
     fn new(prover_config: Self::ProverConfig) -> Self;
-    fn next_message(&mut self, verifier_message: Self::VerifierMessage) -> Self::ProverMessage;
+    fn next_message(
+        &mut self,
+        verifier_message: Self::VerifierMessage,
+        claim_sum: F,
+    ) -> Self::ProverMessage;
 }

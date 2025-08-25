@@ -16,7 +16,7 @@ fn multilinear_product_round_sanity<F, P>(
     F: Field,
     P: Prover<F, VerifierMessage = Option<F>, ProverMessage = Option<Vec<F>>>,
 {
-    let round = p.next_message(message).unwrap();
+    let round = p.next_message(message, F::ZERO).unwrap();
     // g(0) must match
     assert_eq!(
         round[0], eval_0,

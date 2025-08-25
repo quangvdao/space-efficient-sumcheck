@@ -41,16 +41,7 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> Prover<F>
 			}
 			state_comp_set
 		};
-		assert!(state_comp_set.len() > 0);
-
-		let last_round: usize = *state_comp_set.iter().next_back().unwrap();
-		let vsbw_prover = TimeProductProver::<F, S, D> {
-			claim: prover_config.claim,
-			current_round: 0,
-			evaluations: std::array::from_fn(|_| None),
-			streams: None,
-			num_variables: num_variables - last_round + 1,
-		};
+		let last_round: usize = state_comp_set.iter().next_back().copied().unwrap_or(num_variables);
 
 		let streams_vec = prover_config.streams;
 		assert!(streams_vec.len() == D, "requires exactly D streams");
@@ -66,6 +57,14 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> Prover<F>
 			.try_into()
 			.ok()
 			.expect("requires exactly D streams");
+
+		let vsbw_prover = TimeProductProver::<F, S, D> {
+			claim: prover_config.claim,
+			current_round: 0,
+			evaluations: std::array::from_fn(|_| None),
+			streams: None,
+			num_variables: num_variables - last_round + 1,
+		};
 
 		// Build window vector omegas from runtime num_stages (k)
 		let mut windows: Vec<usize> = Vec::new();
@@ -115,7 +114,11 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> Prover<F>
 		}
 	}
 
-	fn next_message(&mut self, verifier_message: Self::VerifierMessage) -> Self::ProverMessage {
+	fn next_message(
+		&mut self,
+		verifier_message: Self::VerifierMessage,
+		_claim_sum: F,
+	) -> Self::ProverMessage {
 		if self.current_round >= self.total_rounds() {
 			return None;
 		}
