@@ -47,7 +47,7 @@ impl FieldMulSmall for ark_bn254::Fr {
         <Self as ark_ff::PrimeField>::from_u64::<5>(n).unwrap()
     }
 
-    #[inline]
+    #[inline(always)]
     fn linear_combination_u64(pairs: &[(Self, u64)]) -> Self {
         // Unreduced accumulation in BigInt, then one reduction
         let mut tmp = ark_ff::BigInt::<4>::mul_u64_w_carry::<5>(&pairs[0].0 .0, pairs[0].1);
@@ -58,7 +58,7 @@ impl FieldMulSmall for ark_bn254::Fr {
         ark_ff::Fp::from_unchecked_nplus1(tmp)
     }
 
-    #[inline]
+    #[inline(always)]
     fn linear_combination_i64(pos: &[(Self, u64)], neg: &[(Self, u64)]) -> Self {
         // Unreduced pos sum
         let mut pos_lc = ark_ff::BigInt::<4>::mul_u64_w_carry::<5>(&pos[0].0 .0, pos[0].1);

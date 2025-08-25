@@ -1,7 +1,6 @@
 use ark_ff::Field;
 use ark_std::vec::Vec;
 use super::field_mul_small::FieldMulSmall;
-// Node-based and Graycode/Lagrange paths removed; only canonical paths remain
 
 // Small helpers mirroring high-d-opt
 #[inline]
@@ -171,7 +170,7 @@ fn eval_inter8_final<F: FieldMulSmall>(p: [(F, F); 8]) -> [F; 8] {
 }
 
 // Fused accumulate variants for layout [1, 2, ..., D-1, ∞]
-#[inline]
+#[inline(always)]
 fn eval_inter2_final_accumulate<F: FieldMulSmall>(p0: (F, F), p1: (F, F), sums: &mut [F]) {
     let r1 = p0.1 * p1.1; // g(1)
     let r_inf = (p0.1 - p0.0) * (p1.1 - p1.0); // ∞
@@ -179,8 +178,8 @@ fn eval_inter2_final_accumulate<F: FieldMulSmall>(p0: (F, F), p1: (F, F), sums: 
     sums[1] += r_inf;
 }
 
-#[inline]
-fn eval_inter4_final_accumulate<F: FieldMulSmall>(p: [(F, F); 4], sums: &mut [F]) {
+#[inline(always)]
+fn eval_inter4_final_accumulate<F: FieldMulSmall>(p: &[(F, F); 4], sums: &mut [F]) {
     #[inline]
     fn helper<F: FieldMulSmall>(fx0: F, fx1: F, f_inf: F) -> F {
         dbl(fx1 + f_inf) - fx0
@@ -195,9 +194,9 @@ fn eval_inter4_final_accumulate<F: FieldMulSmall>(p: [(F, F); 4], sums: &mut [F]
     sums[3] += a_inf * b_inf; // ∞
 }
 
-#[inline]
-fn eval_inter8_final_accumulate<F: FieldMulSmall>(p: [(F, F); 8], sums: &mut [F]) {
-    // innards of eval_inter8_final (accumulating directly)
+#[inline(always)]
+fn eval_inter8_final_accumulate<F: FieldMulSmall>(p: &[(F, F); 8], sums: &mut [F]) {
+    // A direct port of the logic from eval_inter8_final, but accumulating.
     #[inline]
     fn helper_pair<F: FieldMulSmall>(f: &[F; 4], f_inf6: F) -> (F, F) {
         let f3m2 = f[3] - f[2];
@@ -216,6 +215,7 @@ fn eval_inter8_final_accumulate<F: FieldMulSmall>(p: [(F, F); 8], sums: &mut [F]
     let (a5, a6, a7) = batch_helper(a1, a2, a3, a4, a_inf);
     let (b1, b2, b3, b4, b_inf) = eval_inter4(p[4..8].try_into().unwrap());
     let (b5, b6, b7) = batch_helper(b1, b2, b3, b4, b_inf);
+
     sums[0] += a1 * b1;
     sums[1] += a2 * b2;
     sums[2] += a3 * b3;
@@ -230,24 +230,22 @@ fn eval_inter8_final_accumulate<F: FieldMulSmall>(p: [(F, F); 8], sums: &mut [F]
 #[inline]
 fn eval_inter16<F: FieldMulSmall>(p: [(F, F); 16]) -> [F; 17] {
     #[inline]
-    fn helper<F: FieldMulSmall>(f: &[F; 8], f_inf40320: F) -> F {
-        F::linear_combination_i64(&[(f[1] + f[7], 8), (f[3] + f[5], 56), (f_inf40320, 1)], &[
-            (f[2] + f[6], 28),
-            (f[4], 70),
-            (f[0], 1),
-        ])
+    fn helper_idx<F: FieldMulSmall>(f: &[F; 17], b: usize, f_inf40320: F) -> F {
+        // window is f[b-8..b]
+        let a1 = f[b - 7] + f[b - 1]; // f[1]+f[7]
+        let a2 = f[b - 5] + f[b - 3]; // f[3]+f[5]
+        let n1 = f[b - 6] + f[b - 2]; // f[2]+f[6]
+        let n2 = f[b - 4];           // f[4]
+        let n3 = f[b - 8];           // f[0]
+        F::linear_combination_i64(&[(a1, 8), (a2, 56), (f_inf40320, 1)], &[(n1, 28), (n2, 70), (n3, 1)])
     }
     #[inline]
     fn batch_helper<F: FieldMulSmall>(vals: &[F; 9]) -> [F; 17] {
         let mut f = [F::ZERO; 17]; // f[1, ..., 16, inf]
-        for i in 0..8 {
-            f[i] = vals[i];
-        }
+        for i in 0..8 { f[i] = vals[i]; }
         f[16] = vals[8];
         let f_inf40320 = vals[8].mul_u64(40320); // 8!
-        for i in 8..16 {
-            f[i] = helper(&f[(i - 8)..i].try_into().unwrap(), f_inf40320);
-        }
+        for i in 8..16 { f[i] = helper_idx(&f, i, f_inf40320); }
         f
     }
     let a = batch_helper(&eval_inter8(p[0..8].try_into().unwrap()));
@@ -261,24 +259,22 @@ fn eval_inter16<F: FieldMulSmall>(p: [(F, F); 16]) -> [F; 17] {
 #[inline]
 fn eval_inter16_final<F: FieldMulSmall>(p: [(F, F); 16]) -> [F; 16] {
     #[inline]
-    fn helper<F: FieldMulSmall>(f: &[F; 8], f_inf40320: F) -> F {
-        F::linear_combination_i64(&[(f[1] + f[7], 8), (f[3] + f[5], 56), (f_inf40320, 1)], &[
-            (f[2] + f[6], 28),
-            (f[4], 70),
-            (f[0], 1),
-        ])
+    fn helper_idx<F: FieldMulSmall>(f: &[F; 16], b: usize, f_inf40320: F) -> F {
+        // window is f[b-8..b]
+        let a1 = f[b - 7] + f[b - 1]; // f[1]+f[7]
+        let a2 = f[b - 5] + f[b - 3]; // f[3]+f[5]
+        let n1 = f[b - 6] + f[b - 2]; // f[2]+f[6]
+        let n2 = f[b - 4];           // f[4]
+        let n3 = f[b - 8];           // f[0]
+        F::linear_combination_i64(&[(a1, 8), (a2, 56), (f_inf40320, 1)], &[(n1, 28), (n2, 70), (n3, 1)])
     }
     #[inline]
     fn batch_helper<F: FieldMulSmall>(vals: &[F; 9]) -> [F; 16] {
         let mut f = [F::ZERO; 16]; // f[1, ..., 15, inf]
-        for i in 0..8 {
-            f[i] = vals[i];
-        }
+        for i in 0..8 { f[i] = vals[i]; }
         f[15] = vals[8];
         let f_inf40320 = vals[8].mul_u64(40320); // 8!
-        for i in 8..15 {
-            f[i] = helper(&f[(i - 8)..i].try_into().unwrap(), f_inf40320);
-        }
+        for i in 8..15 { f[i] = helper_idx(&f, i, f_inf40320); }
         f
     }
     let a = batch_helper(&eval_inter8(p[0..8].try_into().unwrap()));
@@ -288,15 +284,17 @@ fn eval_inter16_final<F: FieldMulSmall>(p: [(F, F); 16]) -> [F; 16] {
     res
 }
 
-#[inline]
-fn eval_inter16_final_accumulate<F: FieldMulSmall>(p: [(F, F); 16], sums: &mut [F]) {
+#[inline(always)]
+fn eval_inter16_final_accumulate<F: FieldMulSmall>(p: &[(F, F); 16], sums: &mut [F]) {
     #[inline]
-    fn helper<F: FieldMulSmall>(f: &[F; 8], f_inf40320: F) -> F {
-        F::linear_combination_i64(&[(f[1] + f[7], 8), (f[3] + f[5], 56), (f_inf40320, 1)], &[
-            (f[2] + f[6], 28),
-            (f[4], 70),
-            (f[0], 1),
-        ])
+    fn helper_idx<F: FieldMulSmall>(f: &[F; 16], b: usize, f_inf40320: F) -> F {
+        // window is f[b-8..b]
+        let a1 = f[b - 7] + f[b - 1]; // f[1]+f[7]
+        let a2 = f[b - 5] + f[b - 3]; // f[3]+f[5]
+        let n1 = f[b - 6] + f[b - 2]; // f[2]+f[6]
+        let n2 = f[b - 4];           // f[4]
+        let n3 = f[b - 8];           // f[0]
+        F::linear_combination_i64(&[(a1, 8), (a2, 56), (f_inf40320, 1)], &[(n1, 28), (n2, 70), (n3, 1)])
     }
     #[inline]
     fn batch_helper<F: FieldMulSmall>(vals: &[F; 9], sums: &mut [F], off: usize) {
@@ -304,7 +302,7 @@ fn eval_inter16_final_accumulate<F: FieldMulSmall>(p: [(F, F); 16], sums: &mut [
         for i in 0..8 { f[i] = vals[i]; }
         f[15] = vals[8];
         let f_inf40320 = vals[8].mul_u64(40320);
-        for i in 8..15 { f[i] = helper(&f[(i - 8)..i].try_into().unwrap(), f_inf40320); }
+        for i in 8..15 { f[i] = helper_idx(&f, i, f_inf40320); }
         for i in 0..15 { sums[off + i] += f[i]; }
     }
     let a = eval_inter8(p[0..8].try_into().unwrap());
@@ -315,6 +313,7 @@ fn eval_inter16_final_accumulate<F: FieldMulSmall>(p: [(F, F); 16], sums: &mut [
 
 // d = 32: [1, 2, ..., 16, inf] -> [1, 2, ..., 32, inf]
 #[inline]
+#[allow(dead_code)]
 fn eval_inter32<F: FieldMulSmall>(p: [(F, F); 32]) -> [F; 33] {
     #[inline]
     fn helper<F: FieldMulSmall>(f: &[F; 16], f_infbig: F) -> F {
@@ -389,8 +388,8 @@ fn eval_inter32_final<F: FieldMulSmall>(p: [(F, F); 32]) -> [F; 32] {
     res
 }
 
-#[inline]
-fn eval_inter32_final_accumulate<F: FieldMulSmall>(p: [(F, F); 32], sums: &mut [F]) {
+#[inline(always)]
+fn eval_inter32_final_accumulate<F: FieldMulSmall>(p: &[(F, F); 32], sums: &mut [F]) {
     #[inline]
     fn helper<F: FieldMulSmall>(f: &[F; 16], f_infbig: F) -> F {
         F::linear_combination_i64(
@@ -553,10 +552,10 @@ pub fn extrapolate_uk_to_uh<F: FieldMulSmall>(values_uk: &[F], h: usize) -> Vec<
         }
     }
     if k == h { return cur; }
-    // Truncate to h: keep f(1..h) and copy f(∞)
+    // Truncate to h: keep f(1..h) and preserve the leading coefficient.
     let mut out = vec![F::ZERO; h + 1];
     for i in 0..h { out[i] = cur[i]; }
-    out[h] = cur[k];
+    out[h] = *cur.last().unwrap();
     out
 }
 
@@ -773,9 +772,8 @@ pub fn product_eval_univariate_full<F: FieldMulSmall>(pairs: &[(F, F)]) -> Vec<F
 /// into `sums` with message layout [1, 2, ..., D-1, ∞].
 /// For D = 1, the message is [1].
 /// Precondition: sums.len() == if D>1 { D } else { 1 }.
-pub fn product_eval_univariate_accumulate<F: FieldMulSmall, const D: usize>(pairs: &[(F, F)], sums: &mut [F]) {
-    let d = pairs.len();
-    debug_assert_eq!(d, D);
+#[inline(always)]
+pub fn product_eval_univariate_accumulate<F: FieldMulSmall, const D: usize>(pairs: &[(F, F); D], sums: &mut [F]) {
     debug_assert_eq!(sums.len(), if D > 1 { D } else { 1 });
 
     if D == 1 {
@@ -820,7 +818,7 @@ pub fn product_eval_univariate_accumulate<F: FieldMulSmall, const D: usize>(pair
     }
     if D == 4 {
         // [1, 2, 3, ∞]
-        let arr: [(F, F); 4] = pairs.try_into().unwrap();
+        let arr: &[(F, F); 4] = unsafe { &*(pairs as *const _ as *const [(F, F); 4]) };
         eval_inter4_final_accumulate(arr, sums);
         return;
     }
@@ -828,17 +826,17 @@ pub fn product_eval_univariate_accumulate<F: FieldMulSmall, const D: usize>(pair
     // Fast paths for larger power-of-two D using improved univariate evaluation
     if D == 8 {
         // [1..7, ∞]
-        let arr: [(F, F); 8] = pairs.try_into().unwrap();
+        let arr: &[(F, F); 8] = unsafe { &*(pairs as *const _ as *const [(F, F); 8]) };
         eval_inter8_final_accumulate(arr, sums);
         return;
     }
     if D == 16 {
-        let arr: [(F, F); 16] = pairs.try_into().unwrap();
+        let arr: &[(F, F); 16] = unsafe { &*(pairs as *const _ as *const [(F, F); 16]) };
         eval_inter16_final_accumulate(arr, sums);
         return;
     }
     if D == 32 {
-        let arr: [(F, F); 32] = pairs.try_into().unwrap();
+        let arr: &[(F, F); 32] = unsafe { &*(pairs as *const _ as *const [(F, F); 32]) };
         eval_inter32_final_accumulate(arr, sums);
         return;
     }
@@ -874,6 +872,87 @@ pub fn product_eval_univariate_accumulate<F: FieldMulSmall, const D: usize>(pair
     // Accumulate message entries: [1, 2, ..., D-1, ∞]
     for k in 1..D { sums[k - 1] += left_ext[k] * right_ext[k]; }
     sums[D - 1] += left_ext[D] * right_ext[D];
+}
+
+/// Variant that accepts (v1, diff) pairs, where diff = v1 - v0 for each linear factor.
+/// Reconstructs (v0, v1) once per factor, then delegates to the main kernel.
+#[inline(always)]
+pub fn product_eval_univariate_accumulate_from_v1_diff<F: FieldMulSmall, const D: usize>(pairs_v1_diff: &[(F, F)], sums: &mut [F]) {
+    debug_assert_eq!(pairs_v1_diff.len(), D);
+    if D == 1 {
+        sums[0] += pairs_v1_diff[0].0; // g(1) = v1
+        return;
+    }
+    if D == 2 {
+        // [1, ∞]: g(1) = v1_a * v1_b; g(∞) = diff_a * diff_b
+        let (a1, ainf) = (pairs_v1_diff[0].0, pairs_v1_diff[0].1);
+        let (b1, binf) = (pairs_v1_diff[1].0, pairs_v1_diff[1].1);
+        sums[0] += a1 * b1;
+        sums[1] += ainf * binf;
+        return;
+    }
+    if D == 4 {
+        // Two halves of two factors each
+        let (a1, ad) = (pairs_v1_diff[0].0, pairs_v1_diff[0].1);
+        let (b1, bd) = (pairs_v1_diff[1].0, pairs_v1_diff[1].1);
+        let (c1, cd) = (pairs_v1_diff[2].0, pairs_v1_diff[2].1);
+        let (d1, dd) = (pairs_v1_diff[3].0, pairs_v1_diff[3].1);
+        // Left pair values at 1,2,3 and ∞
+        let la1 = a1 * b1;
+        let la2 = (a1 + ad) * (b1 + bd);
+        let la3 = (a1 + ad + ad) * (b1 + bd + bd);
+        let lainf = ad * bd;
+        // Right pair
+        let rb1 = c1 * d1;
+        let rb2 = (c1 + cd) * (d1 + dd);
+        let rb3 = (c1 + cd + cd) * (d1 + dd + dd);
+        let rbinf = cd * dd;
+        sums[0] += la1 * rb1; // 1
+        sums[1] += la2 * rb2; // 2
+        sums[2] += la3 * rb3; // 3
+        sums[3] += lainf * rbinf; // ∞
+        return;
+    }
+    if D == 8 {
+        // Reconstruct (v0,v1) on stack and use optimized kernel
+        let mut arr: [(F, F); 8] = [(F::ZERO, F::ZERO); 8];
+        for j in 0..8 {
+            let v1 = pairs_v1_diff[j].0;
+            let diff = pairs_v1_diff[j].1;
+            arr[j] = (v1 - diff, v1);
+        }
+        eval_inter8_final_accumulate(&arr, sums);
+        return;
+    }
+    if D == 16 {
+        let mut arr: [(F, F); 16] = [(F::ZERO, F::ZERO); 16];
+        for j in 0..16 {
+            let v1 = pairs_v1_diff[j].0;
+            let diff = pairs_v1_diff[j].1;
+            arr[j] = (v1 - diff, v1);
+        }
+        eval_inter16_final_accumulate(&arr, sums);
+        return;
+    }
+    if D == 32 {
+        let mut arr: [(F, F); 32] = [(F::ZERO, F::ZERO); 32];
+        for j in 0..32 {
+            let v1 = pairs_v1_diff[j].0;
+            let diff = pairs_v1_diff[j].1;
+            arr[j] = (v1 - diff, v1);
+        }
+        eval_inter32_final_accumulate(&arr, sums);
+        return;
+    }
+    // Fallback: reconstruct (v0,v1) and delegate
+    let mut pairs: [(F, F); D] = [(F::ZERO, F::ZERO); D];
+    for j in 0..D {
+        let v1 = pairs_v1_diff[j].0;
+        let diff = pairs_v1_diff[j].1;
+        let v0 = v1 - diff;
+        pairs[j] = (v0, v1);
+    }
+    product_eval_univariate_accumulate::<F, D>(&pairs, sums);
 }
 
 
