@@ -297,18 +297,19 @@ fn eval_inter16_final_accumulate<F: FieldMulSmall>(p: &[(F, F); 16], sums: &mut 
         F::linear_combination_i64(&[(a1, 8), (a2, 56), (f_inf40320, 1)], &[(n1, 28), (n2, 70), (n3, 1)])
     }
     #[inline]
-    fn batch_helper<F: FieldMulSmall>(vals: &[F; 9], sums: &mut [F], off: usize) {
+    fn batch_values<F: FieldMulSmall>(vals: &[F; 9]) -> [F; 16] {
         let mut f = [F::ZERO; 16]; // f[1..15, inf]
         for i in 0..8 { f[i] = vals[i]; }
         f[15] = vals[8];
         let f_inf40320 = vals[8].mul_u64(40320);
         for i in 8..15 { f[i] = helper_idx(&f, i, f_inf40320); }
-        for i in 0..15 { sums[off + i] += f[i]; }
+        f
     }
     let a = eval_inter8(p[0..8].try_into().unwrap());
     let b = eval_inter8(p[8..16].try_into().unwrap());
-    batch_helper(&a, sums, 0);
-    batch_helper(&b, sums, 0);
+    let av = batch_values(&a);
+    let bv = batch_values(&b);
+    for i in 0..15 { sums[i] += av[i] * bv[i]; }
 }
 
 // d = 32: [1, 2, ..., 16, inf] -> [1, 2, ..., 32, inf]
@@ -410,18 +411,19 @@ fn eval_inter32_final_accumulate<F: FieldMulSmall>(p: &[(F, F); 32], sums: &mut 
         )
     }
     #[inline]
-    fn batch_helper<F: FieldMulSmall>(vals: &[F; 17], sums: &mut [F], off: usize) {
+    fn batch_values<F: FieldMulSmall>(vals: &[F; 17]) -> [F; 32] {
         let mut f = [F::ZERO; 32]; // f[1..31, inf]
         for i in 0..16 { f[i] = vals[i]; }
         f[31] = vals[16];
         let f_infbig = vals[16].mul_u64(20922789888000u64);
         for i in 16..31 { f[i] = helper(&f[(i - 16)..i].try_into().unwrap(), f_infbig); }
-        for i in 0..31 { sums[off + i] += f[i]; }
+        f
     }
     let a = eval_inter16(p[0..16].try_into().unwrap());
     let b = eval_inter16(p[16..32].try_into().unwrap());
-    batch_helper(&a, sums, 0);
-    batch_helper(&b, sums, 0);
+    let av = batch_values(&a);
+    let bv = batch_values(&b);
+    for i in 0..31 { sums[i] += av[i] * bv[i]; }
 }
 
 // -----------------------------------------------------------------------------

@@ -26,7 +26,7 @@ impl<F: FieldMulSmall, S: Stream<F>, const D: usize> Prover<F> for ImprovedTimeP
         Self {
             claim: prover_config.claim,
             current_round: 0,
-            evaluations: std::array::from_fn(|_| None),
+            evaluations: None,
             streams: Some(streams_arr),
             num_variables,
         }
