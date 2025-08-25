@@ -1,9 +1,8 @@
 use ark_ff::Field;
-use std::collections::BTreeSet;
 
 use crate::{
     messages::VerifierMessages,
-    multilinear_product::{BlendyProductProver, BlendyProductProverConfig, TimeProductProver},
+    multilinear_product::{BlendyProductProver, BlendyProductProverConfig, TimeProductProver, SchedulingParams, compute_cross_product_schedule},
     order_strategy::SignificantBitOrder,
     prover::Prover,
     streams::{Stream, StreamIterator},
@@ -23,50 +22,18 @@ impl<F: Field, S: Stream<F>, const D: usize> Prover<F> for BlendyProductProver<F
         let num_stages: usize = prover_config.num_stages;
         let stage_size: usize = num_variables / num_stages;
 
-        // Paper-aligned parameters
-        // ell := floor(n / (d * k)) with d = D and k = num_stages
-        let ell: usize = core::cmp::max(1, num_variables / (D * num_stages));
-        let time_phase_end: usize = (D.saturating_sub(1)).saturating_mul(ell); // (d-1)*ell
-        // Tail switch window: final ell/k rounds (at least 1)
-        let tail_rounds: usize = core::cmp::max(1, ell / core::cmp::max(1, num_stages));
-        let last_round_phase3: usize = num_variables.saturating_sub(tail_rounds);
-        // Early rounds without passes: start immediately (j'=1), so no special phase1 for D>=2.
-        // For D==1 we avoid passes entirely and stream/linear-time only.
-        let last_round_phase1: usize = if D == 1 { num_variables } else { 0 };
-
-        let state_comp_set: BTreeSet<usize> = {
-            let mut set: BTreeSet<usize> = BTreeSet::new();
-            if D >= 2 {
-                // Time-constrained phase: j' = ceil(eta^t) where eta = d/(d-1)
-                // Generate by recurrence: j_{t+1} = ceil(eta * j_t) with j_0 = 1
-                // ceil(a/b * x) = (a*x + b - 1)/b
-                let num: usize = D; // numerator of eta
-                let den: usize = D - 1; // denominator of eta
-                let mut j_start: usize = 1;
-                while j_start <= time_phase_end && j_start <= last_round_phase3 {
-                    set.insert(j_start);
-                    let next = (num.saturating_mul(j_start) + (den - 1)) / den;
-                    if next <= j_start { break; }
-                    j_start = next;
-                }
-                // Space-constrained phase: passes every ell rounds when j >= (d-1)*ell
-                if ell > 0 {
-                    let m = if time_phase_end == 0 { 1 } else { (time_phase_end + ell - 1) / ell };
-                    let mut j_space = m.saturating_mul(ell);
-                    if j_space == 0 { j_space = ell; }
-                    while j_space <= last_round_phase3 {
-                        set.insert(j_space);
-                        let (next, overflow) = j_space.overflowing_add(ell);
-                        if overflow { break; }
-                        j_space = next;
-                    }
-                }
-                // Ensure we have at least one stage start
-                if set.is_empty() { set.insert(1); }
-            }
-            set
+        // Use shared scheduling logic for CrossProduct algorithm
+        debug_assert!(D >= 2, "BlendyProductProver requires D >= 2");
+        
+        let scheduling_params = SchedulingParams {
+            d: D,
+            num_variables,
+            num_stages,
         };
-        if D >= 2 { assert!(state_comp_set.len() > 0); }
+        let state_comp_set = compute_cross_product_schedule(&scheduling_params);
+        
+        // For compatibility, set last_round_phase1 to 0 (no special early phase for D>=2)
+        let last_round_phase1: usize = 0;
 
         let last_round: usize = state_comp_set.iter().next_back().copied().unwrap_or(num_variables + 1);
         let vsbw_prover = TimeProductProver::<F, S, D> {

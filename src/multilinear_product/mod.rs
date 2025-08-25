@@ -1,4 +1,5 @@
 mod provers;
+mod scheduling;
 mod sumcheck;
 
 pub use provers::{
@@ -9,4 +10,5 @@ pub use provers::{
     time::{TimeProductProver, TimeProductProverConfig},
     time_with_eq::{TimeProductProverWithEq, TimeEqProverConfig},
 };
+pub use scheduling::{SchedulingParams, compute_cross_product_schedule, compute_eval_product_schedule};
 pub use sumcheck::ProductSumcheck;

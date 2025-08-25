@@ -62,7 +62,6 @@ pub struct StreamingEvalProductProver<F: Field, S: Stream<F>, const D: usize> {
 	pub stream_iterators: [StreamIterator<F, S, SignificantBitOrder>; D],
 	pub num_stages: usize,
 	pub num_variables: usize,
-	pub windows: Vec<usize>,
 	pub last_round_phase1: usize,
 	pub verifier_messages: VerifierMessages<F>,
 	pub verifier_messages_round_comp: VerifierMessages<F>,
@@ -72,8 +71,8 @@ pub struct StreamingEvalProductProver<F: Field, S: Stream<F>, const D: usize> {
 	pub state_comp_set: BTreeSet<usize>,
 	pub switched_to_vsbw: bool,
 	pub vsbw_prover: TimeProductProver<F, S, D>,
-	// Window runtime state
-	pub current_window_idx: usize,
+	// Window runtime state  
+	pub current_window_size: usize,
 	pub window_offset: usize,
 	pub reduced_grid: Option<Vec<F>>, // evaluation grid for remaining axes (A^{ω-Δ})
 	pub reduced_shape: Vec<usize>,    // shape per axis (each D+1)
@@ -339,63 +338,70 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> StreamingEvalProduc
 	///     the grid is cleared. This signals that the window is complete, and a new one will be
 	///     built on the next call.
 	pub fn compute_state(&mut self) {
-		println!(
-			"DEBUG Streaming: compute_state round={}, switched_to_vsbw={}, reduced_grid_none={}, current_window_idx={}, windows={:?}",
-			self.current_round,
-			self.switched_to_vsbw,
-			self.reduced_grid.is_none(),
-			self.current_window_idx,
-			self.windows
-		);
-		// Tail switch behavior maintained
 		let j = self.current_round + 1;
 		let p = self.state_comp_set.contains(&j);
 		let is_largest = self.state_comp_set.range((j + 1)..).next().is_none();
-		if p && is_largest {
+		
+		if p && !is_largest {
+			// Start of a new window pass: compute window size and build grid
+			let j_prime = j; // Current round is the start of this window
+			
+			// Compute window size as distance to next pass start (or end of protocol)
+			let omega = if let Some(&next_round) = self.state_comp_set.range((j + 1)..).next() {
+				next_round - j
+			} else {
+				self.num_variables + 1 - j
+			};
+			
+			println!(
+				"DEBUG EvalProduct: Starting window pass at round {}, j_prime={}, omega={}",
+				j, j_prime, omega
+			);
+			
+			// Allocate and populate the window grid
+			self.current_window_size = omega;
+			self.reduced_shape = core::iter::repeat(D + 1).take(omega).collect();
+			let total = self.reduced_shape.iter().copied().fold(1usize, |acc, s| acc * s);
+			self.reduced_grid = Some(vec![F::ZERO; total]);
+			self.window_offset = 0;
+			self.build_window_grid(omega);
+		} else if p && is_largest {
+			// Switch to VSBW for final rounds
 			let num_variables_new = self.num_variables - j + 1;
 			self.switched_to_vsbw = true;
+			
+			println!(
+				"DEBUG EvalProduct: Switching to VSBW at round {}, remaining vars={}",
+				j, num_variables_new
+			);
+			
 			self.stream_iterators.iter_mut().for_each(|it| it.reset());
 			let side = 1 << num_variables_new;
 			let mut evals: [Vec<F>; D] = std::array::from_fn(|_| vec![F::ZERO; side]);
-			for t in 0..D { self.vsbw_prover.evaluations[t] = Some(std::mem::take(&mut evals[t])); }
-			return;
-		}
-		if self.switched_to_vsbw {
+			for t in 0..D { 
+				self.vsbw_prover.evaluations[t] = Some(std::mem::take(&mut evals[t])); 
+			}
+		} else if self.switched_to_vsbw {
+			// Continue with VSBW
 			let verifier_message = self.verifier_messages.messages[self.current_round - 1];
 			self.vsbw_prover.vsbw_reduce_evaluations(verifier_message);
-			return;
-		}
-
-		// Window-grid flow
-		if self.reduced_grid.is_none() {
-			// Start of a new window: allocate zero grid with shape (D+1)^ω and populate from streams
-			if self.current_window_idx < self.windows.len() {
-				let omega = self.windows[self.current_window_idx];
-				if self.num_variables <= 4 { println!("DEBUG Streaming: new window ω={}, windows={:?}", omega, self.windows); }
-				self.reduced_shape = core::iter::repeat(D + 1).take(omega).collect();
-				let total = self.reduced_shape.iter().copied().fold(1usize, |acc, s| acc * s);
-				self.reduced_grid = Some(vec![F::ZERO; total]);
-				self.window_offset = 0;
-				self.build_window_grid(omega);
-			} else {
-				// No more windows; remain in per-round streaming (not yet implemented)
-			}
 		} else {
-			// Advance within the window only if at least two axes remain (so compute_round still sees a line)
-			if self.current_round > 0 {
-				if self.reduced_shape.len() > 1 && self.window_offset < self.reduced_shape.len() {
+			// Within a window: collapse axis if we have a challenge from previous round
+			if self.current_round > 0 && self.reduced_grid.is_some() {
+				if self.reduced_shape.len() > 1 {
 					let r = self.verifier_messages.messages[self.current_round - 1];
 					self.collapse_axis_at_point(r);
-					// If finished window, move to next window
+					
+					// Check if window is finished
 					if self.reduced_shape.is_empty() {
 						self.reduced_grid = None;
-						self.current_window_idx += 1;
+						self.current_window_size = 0;
 						self.window_offset = 0;
 					}
 				} else if self.reduced_shape.len() <= 1 {
-					// No collapses to perform for ω=1; end this window and rebuild next round
+					// Window with single axis is finished
 					self.reduced_grid = None;
-					self.current_window_idx += 1;
+					self.current_window_size = 0;
 					self.window_offset = 0;
 				}
 			}

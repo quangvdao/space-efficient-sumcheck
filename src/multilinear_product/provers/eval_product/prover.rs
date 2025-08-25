@@ -1,10 +1,9 @@
 use ark_ff::Field;
 use crate::interpolation::field_mul_small::FieldMulSmall;
-use std::collections::BTreeSet;
 
 use crate::{
 	messages::VerifierMessages,
-	multilinear_product::{StreamingEvalProductProver, StreamingEvalProductProverConfig, TimeProductProver},
+	multilinear_product::{StreamingEvalProductProver, StreamingEvalProductProverConfig, TimeProductProver, SchedulingParams, compute_eval_product_schedule},
 	order_strategy::SignificantBitOrder,
 	prover::Prover,
 	streams::{Stream, StreamIterator},
@@ -25,22 +24,20 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> Prover<F>
 		let num_variables: usize = prover_config.num_variables;
 		let num_stages: usize = prover_config.num_stages;
 		let stage_size: usize = num_variables / num_stages;
-		let max_rounds_phase2: usize = num_variables.div_ceil(2 * num_stages);
 
-		let last_round_phase1: usize = 2;
-		let last_round_phase3: usize = num_variables - num_variables.div_ceil(num_stages);
 
-		let state_comp_set: BTreeSet<usize> = {
-			let mut current_round: usize = last_round_phase1 + 1;
-			let mut state_comp_set: BTreeSet<usize> = BTreeSet::new();
-			while current_round <= last_round_phase3 {
-				state_comp_set.insert(current_round);
-				current_round =
-					std::cmp::min(current_round + max_rounds_phase2, current_round * 2 - 1);
-				current_round = std::cmp::max(current_round, 2);
-			}
-			state_comp_set
+		// Use shared scheduling logic for EvalProduct algorithm
+		debug_assert!(D >= 2, "StreamingEvalProductProver requires D >= 2");
+		
+		let scheduling_params = SchedulingParams {
+			d: D,
+			num_variables,
+			num_stages,
 		};
+		let state_comp_set = compute_eval_product_schedule(&scheduling_params);
+		
+		// For compatibility, set last_round_phase1 to 0 (no special early phase for D>=2)
+		let last_round_phase1: usize = 0;
 		let last_round: usize = state_comp_set.iter().next_back().copied().unwrap_or(num_variables);
 
 		let streams_vec = prover_config.streams;
@@ -65,34 +62,6 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> Prover<F>
 			streams: None,
 			num_variables: num_variables - last_round + 1,
 		};
-
-		// Build window vector omegas from runtime num_stages (k)
-		let mut windows: Vec<usize> = Vec::new();
-		{
-			let delta = ((D + 1) as f64).log2();
-			let mut j_prime: usize = 0;
-			// Time-constrained phase
-			while j_prime < num_variables {
-				let omega = ((j_prime as f64) / (delta - 1.0)).floor() as usize;
-				let omega = omega.max(1);
-				if j_prime + omega > num_variables { break; }
-				windows.push(omega);
-				j_prime += omega;
-				// stop when window size reaches space phase target
-				let omega_space = (num_variables / (num_stages * (delta as usize).max(1))).max(1);
-				if omega >= omega_space { break; }
-			}
-			// Space-constrained phase
-			let omega_space = (num_variables / (num_stages * (delta as usize).max(1))).max(1);
-			while j_prime + omega_space <= num_variables {
-				windows.push(omega_space);
-				j_prime += omega_space;
-			}
-		}
-		// Fallback: ensure at least one window exists to trigger grid construction
-		if windows.is_empty() {
-			windows.push(1);
-		}
 		
 		Self {
 			claim: prover_config.claim,
@@ -101,7 +70,6 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> Prover<F>
 			stream_iterators,
 			num_stages,
 			num_variables,
-			windows,
 			last_round_phase1,
 			verifier_messages: VerifierMessages::new(&vec![]),
 			verifier_messages_round_comp: VerifierMessages::new(&vec![]),
@@ -111,7 +79,7 @@ impl<F: Field + FieldMulSmall, S: Stream<F>, const D: usize> Prover<F>
 			state_comp_set,
 			switched_to_vsbw: false,
 			vsbw_prover,
-			current_window_idx: 0,
+			current_window_size: 0,
 			window_offset: 0,
 			reduced_grid: None,
 			reduced_shape: Vec::new(),
