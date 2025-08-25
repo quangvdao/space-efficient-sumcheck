@@ -40,9 +40,9 @@ fn validate_d_value_for_product_algorithms(
         | AlgorithmLabel::ProductVSBW
         | AlgorithmLabel::ProductCTY
         | AlgorithmLabel::ProductImprovedTime => match d {
-            2 | 3 | 4 | 8 | 16 => Ok(()),
+            2 | 3 | 4 | 8 | 16 | 32 => Ok(()),
             _ => Err(format!(
-                "Unsupported d value: {}. Product algorithms only support d ∈ {{2, 3, 4, 8, 16}}",
+                "Unsupported d value: {}. Product algorithms only support d ∈ {{2, 3, 4, 8, 16, 32}}",
                 d
             )),
         },

@@ -5,20 +5,30 @@
 #       This differs from the printed usage string.
 
 # Optional toggles:
-#   ./run_benches.sh                       → run all fields (Field64 Field128 FieldBn254)
-#   ./run_benches.sh --bn254-only          → restrict to FieldBn254 only
-#   ./run_benches.sh simple                → run one point (n=16 by default) for each algo/field
-#   ./run_benches.sh --d 8                 → set number of multilinears (product benches only)
-#   Toggles can be combined, e.g.: ./run_benches.sh --bn254-only --d 8 simple
+#   ./run_benches.sh                             → run all fields (Field64 Field128 FieldBn254)
+#   ./run_benches.sh --bn254-only                → restrict to FieldBn254 only
+#   ./run_benches.sh simple                      → run one point (n=16 by default) for each algo/field
+#   ./run_benches.sh --d 8                       → set number of multilinears (product benches only)
+#   ./run_benches.sh --compare-time              → compare only ProductVSBW vs ProductImprovedTime (BN254 enforced)
+#   Toggles can be combined, e.g.: ./run_benches.sh --compare-time --d 8 simple
 
 BN254_ONLY=0
+COMPARE_TIME_ONLY=0
 SIMPLE=0
 D_OVERRIDE=""
+NO_BUILD=0
+# Resolve script directory and ensure we run relative to it so paths work from any CWD
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+cd "$SCRIPT_DIR" || { echo "Failed to cd to script dir: $SCRIPT_DIR"; exit 1; }
 # Parse optional toggles in any order
 while [ $# -gt 0 ]; do
   case "$1" in
     --bn254-only)
       BN254_ONLY=1;
+      shift;;
+    --compare-time|--time-vs-improved)
+      COMPARE_TIME_ONLY=1;
+      BN254_ONLY=1; # ImprovedTime is BN254-only
       shift;;
     simple|--simple)
       SIMPLE=1;
@@ -29,28 +39,40 @@ while [ $# -gt 0 ]; do
         D_OVERRIDE="$1";
         # Validate d value early
         case "$D_OVERRIDE" in
-          2|3|4|8|16) ;;
+          2|3|4|8|16|32) ;;
           *) 
-            echo "Error: Unsupported d value: $D_OVERRIDE. Product algorithms only support d ∈ {2, 3, 4, 8, 16}"
+            echo "Error: Unsupported d value: $D_OVERRIDE. Product algorithms only support d ∈ {2, 3, 4, 8, 16, 32}"
             exit 1;;
         esac
         shift;
       fi;;
+    --no-build)
+      NO_BUILD=1;
+      shift;;
     *)
       break;;
   esac
 done
 
-# Ensure release binary exists
-BIN=./target/release/sumcheck-benches
-if [ ! -x "$BIN" ]; then
+# Build the release bench binary unless disabled
+BIN="$SCRIPT_DIR/target/release/sumcheck-benches"
+if [ $NO_BUILD -ne 1 ]; then
   echo "Building release bench binary..."
   cargo build -p sumcheck-benches --release || { echo "Build failed"; exit 1; }
 fi
+if [ ! -x "$BIN" ]; then
+  echo "Error: bench binary not found at $BIN"
+  exit 1
+fi
 
-# Limit to BN254 only and include the improved-time product prover
-# Commented out multilinear algorithms: `Blendy1 Blendy2 VSBW Blendy3 Blendy4 CTY`
-algorithms="ProductBlendy2 ProductVSBW ProductCTY ProductImprovedTime"
+# Select algorithm set
+if [ $COMPARE_TIME_ONLY -eq 1 ]; then
+  algorithms="ProductVSBW ProductImprovedTime"
+else
+  # Include the improved-time product prover alongside others by default
+  # Commented out multilinear algorithms: `Blendy1 Blendy2 VSBW Blendy3 Blendy4 CTY`
+  algorithms="ProductBlendy2 ProductVSBW ProductCTY ProductImprovedTime"
+fi
 if [ $BN254_ONLY -eq 1 ]; then
   fields="FieldBn254"
 else
